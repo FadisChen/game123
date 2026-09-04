@@ -1,0 +1,38 @@
+:root {
+  --color-player-green: #118a65;
+  --color-doll-orange: #f4a261;
+  --color-guard-magenta: #e639e6;
+  --color-field-yellow: #fdd835;
+  --color-alert-red: #f94144;
+  --color-ink: #333333;
+  --color-paper: #f2f2f2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+  font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+canvas {
+  display: block;
+}
