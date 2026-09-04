@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { COLORS, FINISH_DISTANCE_M, STEP_TWEEN_MS } from "../config";
 import type { Foot } from "./Player";
+import { drawDollBack, drawDollFront, drawGuard, drawSensorGlow, drawTree } from "./sprites";
 
 const CAMERA_HEIGHT_M = 1.6;
 const PATH_HALF_WIDTH_M = 3;
@@ -9,105 +10,23 @@ const GHOST_OFFSET_FROM_FINISH_M = 2;
 const BOB_HEIGHT_M = 0.06;
 const SHAKE_DURATION_MS = 220;
 const SHAKE_MAGNITUDE_M = 0.05;
+const SENSOR_FADE_FACTOR = 0.25;
 
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-/** 建立一段角度不一的枯枝，貼近參考圖「枯樹」的裸枝造型。 */
-function buildTree(): THREE.Group {
-  const tree = new THREE.Group();
-
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.28, 2.4, 8),
-    new THREE.MeshStandardMaterial({ color: COLORS.trunkBrown, roughness: 1 }),
-  );
-  trunk.position.y = 1.2;
-  tree.add(trunk);
-
-  const branchMaterial = new THREE.MeshStandardMaterial({ color: COLORS.trunkBrown, roughness: 1 });
-  const branchCount = 7;
-  for (let i = 0; i < branchCount; i++) {
-    const length = 1.1 + Math.random() * 0.8;
-    const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, length, 5), branchMaterial);
-    const angle = (i / branchCount) * Math.PI * 2 + Math.random() * 0.4;
-    const tilt = 0.5 + Math.random() * 0.6;
-    branch.position.set(0, 2.3 + Math.random() * 0.6, 0);
-    branch.rotation.z = Math.cos(angle) * tilt;
-    branch.rotation.x = Math.sin(angle) * tilt;
-    branch.translateY(length / 2);
-    tree.add(branch);
-  }
-
-  return tree;
+function colorHex(color: number): string {
+  return `#${color.toString(16).padStart(6, "0")}`;
 }
 
-/** 鬼（娃）：橘色洋裝 + 雙馬尾 Q 版女孩人偶，眼睛顏色可在 LOOKING 時變紅。 */
-function buildGhostDoll(): { group: THREE.Group; eyeMaterial: THREE.MeshStandardMaterial } {
-  const group = new THREE.Group();
-
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.32, 0.7, 4, 8),
-    new THREE.MeshStandardMaterial({ color: COLORS.dollOrange }),
-  );
-  body.position.y = 0.75;
-  group.add(body);
-
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.26, 16, 12),
-    new THREE.MeshStandardMaterial({ color: COLORS.dollSkin }),
-  );
-  head.position.y = 1.5;
-  group.add(head);
-
-  const hairCap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.27, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
-    new THREE.MeshStandardMaterial({ color: COLORS.dollHair }),
-  );
-  hairCap.position.y = 1.58;
-  group.add(hairCap);
-
-  const pigtailGeometry = new THREE.SphereGeometry(0.1, 10, 8);
-  const pigtailMaterial = new THREE.MeshStandardMaterial({ color: COLORS.dollHair });
-  const leftPigtail = new THREE.Mesh(pigtailGeometry, pigtailMaterial);
-  leftPigtail.position.set(-0.3, 1.5, 0);
-  group.add(leftPigtail);
-  const rightPigtail = new THREE.Mesh(pigtailGeometry, pigtailMaterial);
-  rightPigtail.position.set(0.3, 1.5, 0);
-  group.add(rightPigtail);
-
-  const eyeMaterial = new THREE.MeshStandardMaterial({
-    color: COLORS.dollHair,
-    emissive: new THREE.Color(COLORS.dollHair),
-    emissiveIntensity: 0.4,
-  });
-  const eyeGeometry = new THREE.CircleGeometry(0.035, 12);
-  const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-  leftEye.position.set(-0.09, 1.51, 0.245);
-  group.add(leftEye);
-  const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-  rightEye.position.set(0.09, 1.51, 0.245);
-  group.add(rightEye);
-
-  return { group, eyeMaterial };
-}
-
-/** 純裝飾用的粉紅守衛，不參與判定，強化尾牙活動氛圍。 */
-function buildDecorativeGuard(): THREE.Group {
-  const guard = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 1.1, 0.3),
-    new THREE.MeshStandardMaterial({ color: COLORS.guardMagenta }),
-  );
-  body.position.y = 0.85;
-  guard.add(body);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 12, 10),
-    new THREE.MeshStandardMaterial({ color: COLORS.guardMagenta }),
-  );
-  head.position.y = 1.55;
-  guard.add(head);
-  return guard;
+/** 建立一個永遠面向攝影機的 2D 插畫看板（billboard），錨點在底部貼地（position.y = 0 即為地面）。 */
+function createBillboardSprite(texture: THREE.CanvasTexture, width: number, height: number): THREE.Sprite {
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(width, height, 1);
+  sprite.center.set(0.5, 0);
+  return sprite;
 }
 
 export class GameScene {
@@ -115,8 +34,9 @@ export class GameScene {
   readonly camera: THREE.PerspectiveCamera;
   readonly renderer: THREE.WebGLRenderer;
 
-  private readonly ghostGroup: THREE.Group;
-  private readonly ghostEyeMaterial: THREE.MeshStandardMaterial;
+  private readonly ghostFrontSprite: THREE.Sprite;
+  private readonly ghostBackSprite: THREE.Sprite;
+  private readonly ghostSensorSprite: THREE.Sprite;
   private readonly container: HTMLElement;
 
   private cameraDistance = 0;
@@ -127,6 +47,7 @@ export class GameScene {
   private tweenFoot: Foot = "left";
 
   private shakeStartedAt = -Infinity;
+  private sensorOpacity = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -153,21 +74,38 @@ export class GameScene {
     this.buildLines();
     this.buildFence();
 
-    const tree = buildTree();
-    tree.position.set(-2.2, 0, FINISH_DISTANCE_M - 1);
-    this.scene.add(tree);
+    const treeSprite = createBillboardSprite(drawTree(colorHex(COLORS.trunkBrown)), 2.4, 3.2);
+    treeSprite.position.set(-2.2, 0, FINISH_DISTANCE_M - 1);
+    this.scene.add(treeSprite);
 
-    const { group: ghostGroup, eyeMaterial } = buildGhostDoll();
-    ghostGroup.position.set(0, 0, FINISH_DISTANCE_M - GHOST_OFFSET_FROM_FINISH_M);
-    this.scene.add(ghostGroup);
-    this.ghostGroup = ghostGroup;
-    this.ghostEyeMaterial = eyeMaterial;
+    const ghostZ = FINISH_DISTANCE_M - GHOST_OFFSET_FROM_FINISH_M;
+    this.ghostBackSprite = createBillboardSprite(
+      drawDollBack(colorHex(COLORS.dollOrange), colorHex(COLORS.dollHair)),
+      1.0,
+      1.7,
+    );
+    this.ghostBackSprite.position.set(0, 0, ghostZ);
+    this.scene.add(this.ghostBackSprite);
 
+    this.ghostFrontSprite = createBillboardSprite(
+      drawDollFront(colorHex(COLORS.dollOrange), colorHex(COLORS.dollSkin), colorHex(COLORS.dollHair)),
+      1.0,
+      1.7,
+    );
+    this.ghostFrontSprite.position.set(0, 0, ghostZ);
+    this.ghostFrontSprite.visible = false;
+    this.scene.add(this.ghostFrontSprite);
+
+    this.ghostSensorSprite = createBillboardSprite(drawSensorGlow(colorHex(COLORS.alertRed)), 0.22, 0.22);
+    this.ghostSensorSprite.position.set(0.16, 1.5, ghostZ - 0.05);
+    (this.ghostSensorSprite.material as THREE.SpriteMaterial).opacity = 0;
+    this.scene.add(this.ghostSensorSprite);
+
+    const guardTexture = drawGuard(colorHex(COLORS.guardMagenta));
     for (const x of [-FIELD_HALF_WIDTH_M * 0.6, FIELD_HALF_WIDTH_M * 0.6]) {
-      const guard = buildDecorativeGuard();
-      guard.position.set(x, 0, FINISH_DISTANCE_M * 0.4);
-      guard.rotation.y = x < 0 ? Math.PI / 6 : -Math.PI / 6;
-      this.scene.add(guard);
+      const guardSprite = createBillboardSprite(guardTexture, 1.0, 1.75);
+      guardSprite.position.set(x, 0, FINISH_DISTANCE_M * 0.4);
+      this.scene.add(guardSprite);
     }
 
     window.addEventListener("resize", () => this.handleResize());
@@ -237,13 +175,18 @@ export class GameScene {
     }
   }
 
-  /** 更新鬼的轉身動畫（0=背對玩家，1=正面朝玩家）與眼睛偵測燈號。 */
+  /**
+   * 更新鬼的轉身視覺：facingAmount 超過一半時切換成正面插畫（看得到臉），
+   * 否則顯示背面插畫（只看得到後腦勺）；感測器紅光只在 isLooking 判定生效時淡入。
+   */
   updateGhostVisual(facingAmount: number, isLooking: boolean): void {
-    this.ghostGroup.rotation.y = Math.PI * (1 - facingAmount);
-    const eyeColor = isLooking ? COLORS.alertRed : COLORS.dollHair;
-    this.ghostEyeMaterial.color.set(eyeColor);
-    this.ghostEyeMaterial.emissive.set(eyeColor);
-    this.ghostEyeMaterial.emissiveIntensity = isLooking ? 1.2 : 0.4;
+    const facingPlayer = facingAmount >= 0.5;
+    this.ghostFrontSprite.visible = facingPlayer;
+    this.ghostBackSprite.visible = !facingPlayer;
+
+    const targetOpacity = isLooking ? 1 : 0;
+    this.sensorOpacity += (targetOpacity - this.sensorOpacity) * SENSOR_FADE_FACTOR;
+    (this.ghostSensorSprite.material as THREE.SpriteMaterial).opacity = this.sensorOpacity;
   }
 
   /** 觸發一次成功前進的攝影機補間動畫（含依左右腳交替的踏步擺動）。 */
