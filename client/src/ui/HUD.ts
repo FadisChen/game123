@@ -1,4 +1,5 @@
 import { CAUGHT_TOAST_MS, INITIAL_SCORE } from "../config";
+import { sfx } from "../game/audio";
 
 export type ToastVariant = "warn" | "danger" | "success" | "info";
 
@@ -15,7 +16,11 @@ export class HUD {
   private readonly scoreEl: HTMLDivElement;
   private readonly countdownEl: HTMLDivElement;
   private readonly toastEl: HTMLDivElement;
+  private readonly muteButton: HTMLButtonElement;
+  private readonly sprintBannerEl: HTMLDivElement;
+  private readonly vignetteEl: HTMLDivElement;
   private toastTimer: number | undefined;
+  private sprintBannerTimer: number | undefined;
 
   constructor(container: HTMLElement) {
     this.root = document.createElement("div");
@@ -29,6 +34,20 @@ export class HUD {
       display:flex; align-items:center; gap:6px;
     `;
     this.root.appendChild(this.scoreEl);
+
+    this.muteButton = document.createElement("button");
+    this.muteButton.style.cssText = `
+      pointer-events:auto; position:absolute; top:16px; right:16px;
+      width:44px; height:44px; border-radius:50%; border:none;
+      background:#333333dd; color:#f2f2f2; font-size:20px; cursor:pointer;
+    `;
+    this.muteButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const muted = sfx.toggleMuted();
+      this.refreshMuteIcon(muted);
+    });
+    this.refreshMuteIcon(sfx.isMuted());
+    this.root.appendChild(this.muteButton);
 
     this.countdownEl = document.createElement("div");
     this.countdownEl.style.cssText = `
@@ -47,8 +66,27 @@ export class HUD {
     `;
     this.root.appendChild(this.toastEl);
 
+    this.sprintBannerEl = document.createElement("div");
+    this.sprintBannerEl.style.cssText = `
+      position:absolute; top:40%; left:50%; transform:translate(-50%, -50%);
+      color:#f94144; font-size:40px; font-weight:900; letter-spacing:2px;
+      text-shadow:0 2px 8px rgba(0,0,0,0.5); display:none;
+    `;
+    this.root.appendChild(this.sprintBannerEl);
+
+    this.vignetteEl = document.createElement("div");
+    this.vignetteEl.style.cssText = `
+      position:absolute; inset:0; pointer-events:none;
+      box-shadow: inset 0 0 0 rgba(249,65,68,0); display:none;
+    `;
+    this.root.appendChild(this.vignetteEl);
+
     container.appendChild(this.root);
     this.setScore(INITIAL_SCORE);
+  }
+
+  private refreshMuteIcon(muted: boolean): void {
+    this.muteButton.textContent = muted ? "🔇" : "🔊";
   }
 
   setScore(score: number): void {
@@ -74,6 +112,28 @@ export class HUD {
     this.toastTimer = window.setTimeout(() => {
       this.toastEl.style.display = "none";
     }, CAUGHT_TOAST_MS);
+  }
+
+  /** 最後衝刺提示（對應 PRD 22.3），短暫顯示後淡出，並開啟持續到本局結束的紅色警示暈影。 */
+  showFinalSprintBanner(text: string): void {
+    this.sprintBannerEl.textContent = text;
+    this.sprintBannerEl.style.display = "block";
+    this.sprintBannerEl.style.opacity = "1";
+    window.clearTimeout(this.sprintBannerTimer);
+    this.sprintBannerTimer = window.setTimeout(() => {
+      this.sprintBannerEl.style.transition = "opacity 600ms";
+      this.sprintBannerEl.style.opacity = "0";
+    }, 1400);
+    this.vignetteEl.style.display = "block";
+    this.vignetteEl.classList.add("final-sprint-vignette");
+  }
+
+  resetFinalSprint(): void {
+    window.clearTimeout(this.sprintBannerTimer);
+    this.sprintBannerEl.style.display = "none";
+    this.sprintBannerEl.style.transition = "";
+    this.vignetteEl.style.display = "none";
+    this.vignetteEl.classList.remove("final-sprint-vignette");
   }
 
   setVisible(visible: boolean): void {

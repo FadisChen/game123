@@ -1,11 +1,12 @@
-import { COUNTDOWN_SECONDS, STEP_TWEEN_MS } from "../config";
+import { COUNTDOWN_SECONDS, FINAL_SPRINT_REMAINING_M, FINISH_DISTANCE_M, STEP_TWEEN_MS } from "../config";
 import { HUD } from "../ui/HUD";
 import { TeachingScreen } from "../ui/TeachingScreen";
 import { GameOverScreen, type GameOutcome } from "../ui/GameOverScreen";
 import { Controls } from "../ui/Controls";
 import { GameScene } from "./Scene";
-import { GhostAI } from "./GhostAI";
+import { GhostAI, type GhostState } from "./GhostAI";
 import { Player, type Foot } from "./Player";
+import { sfx } from "./audio";
 
 type GameState = "TEACHING" | "COUNTDOWN" | "PLAYING" | "GAME_OVER";
 
@@ -22,6 +23,8 @@ export class GameController {
   private player: Player;
   private countdownValue = COUNTDOWN_SECONDS;
   private countdownIntervalId: number | undefined;
+  private previousGhostState: GhostState | null = null;
+  private finalSprintTriggered = false;
 
   constructor(container: HTMLElement) {
     this.scene = new GameScene(container);
@@ -40,6 +43,7 @@ export class GameController {
   private enterTeaching(): void {
     this.state = "TEACHING";
     this.hud.setVisible(false);
+    this.hud.resetFinalSprint();
     this.controls.setVisible(false);
     this.gameOver.hide();
     this.teaching.setVisible(true);
@@ -52,14 +56,17 @@ export class GameController {
     this.hud.setVisible(true);
     this.countdownValue = COUNTDOWN_SECONDS;
     this.hud.showCountdown(String(this.countdownValue));
+    sfx.play("countdown");
 
     this.countdownIntervalId = window.setInterval(() => {
       this.countdownValue -= 1;
       if (this.countdownValue > 0) {
         this.hud.showCountdown(String(this.countdownValue));
+        sfx.play("countdown");
         return;
       }
       this.hud.showCountdown("GO!");
+      sfx.play("go");
       window.clearInterval(this.countdownIntervalId);
       window.setTimeout(() => this.startPlaying(), 500);
     }, 1000);
@@ -67,11 +74,14 @@ export class GameController {
 
   private startPlaying(): void {
     this.hud.hideCountdown();
+    this.hud.resetFinalSprint();
     this.state = "PLAYING";
     this.controls.setVisible(true);
 
     this.ghost = new GhostAI(performance.now());
     this.player = new Player(this.ghost);
+    this.previousGhostState = this.ghost.getState();
+    this.finalSprintTriggered = false;
     this.hud.setScore(this.player.score);
     this.scene.setCameraDistanceImmediate(0);
   }
@@ -90,16 +100,31 @@ export class GameController {
         this.hud.showToast("被發現! -1分", "warn");
         this.scene.startCaughtShake(now);
         if (result.eliminated) {
+          sfx.play("eliminated");
           window.setTimeout(() => this.endGame("eliminated"), 400);
+        } else {
+          sfx.play("caught");
         }
         break;
       case "advanced":
+        sfx.play("footstep");
         this.scene.startStepTween(result.distanceAfter, foot, now);
+        this.maybeTriggerFinalSprint(result.distanceAfter);
         if (result.finished) {
+          sfx.play("victory");
           window.setTimeout(() => this.endGame("finished"), STEP_TWEEN_MS + 200);
         }
         break;
     }
+  }
+
+  /** 距終點剩 FINAL_SPRINT_REMAINING_M 內時觸發一次緊張提示（對應 PRD 22.3）。 */
+  private maybeTriggerFinalSprint(distance: number): void {
+    if (this.finalSprintTriggered) return;
+    const remaining = FINISH_DISTANCE_M - distance;
+    if (remaining <= 0 || remaining > FINAL_SPRINT_REMAINING_M) return;
+    this.finalSprintTriggered = true;
+    this.hud.showFinalSprintBanner(`最後 ${Math.ceil(remaining)} 公尺！`);
   }
 
   private endGame(outcome: GameOutcome): void {
@@ -115,6 +140,14 @@ export class GameController {
   private loop(now: number): void {
     if (this.state === "PLAYING") {
       this.ghost.update(now);
+      const currentGhostState = this.ghost.getState();
+      if (
+        this.previousGhostState !== currentGhostState &&
+        (currentGhostState === "TURNING_TO_LOOK" || currentGhostState === "FAKE_TURN")
+      ) {
+        sfx.play("ghostTurn");
+      }
+      this.previousGhostState = currentGhostState;
       this.scene.updateGhostVisual(this.ghost.getFacingPlayerAmount(now), this.ghost.isLooking());
     }
     this.scene.updateAnimations(now);

@@ -11,6 +11,14 @@ export const STEP_TWEEN_MS = 180;
 export const CAUGHT_TOAST_MS = 1000;
 export const FOOT_BUTTON_LOCKOUT_MS = 120;
 
+// 鬼的假動作（PRD 22.1）：偶爾只轉一半就轉回去，製造心理壓力但不判定違規
+export const FAKE_TURN_CHANCE = 0.35;
+export const FAKE_TURN_PEAK = 0.4;
+export const FAKE_TURN_DURATION_MS = GHOST_TURN_DURATION_MS * 2;
+
+// 最後衝刺（PRD 22.3）：距終點剩這個距離內顯示緊張提示與警示暈影
+export const FINAL_SPRINT_REMAINING_M = 10;
+
 // 色票（對應使用者提供的美術參考圖）
 export const COLORS = {
   playerGreen: 0x118a65,
