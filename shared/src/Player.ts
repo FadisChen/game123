@@ -1,4 +1,4 @@
-import { FINISH_DISTANCE_M, INITIAL_SCORE, STEP_DISTANCE_M } from "../config";
+import { FINISH_DISTANCE_M, INITIAL_SCORE, STEP_DISTANCE_M } from "./config";
 
 export type Foot = "left" | "right";
 
@@ -14,6 +14,9 @@ export interface LookingCheck {
 /**
  * 玩家狀態與左右腳交替規則（對應 PRD 7.3、23.1）。
  * 違規時原地不動只扣分，不給予距離（見規劃文件的設計決策）。
+ *
+ * Phase 2：這個類別搬到 shared，實際上只由伺服器端 instantiate 並呼叫 step()
+ * （每個房間、每位玩家各一個實例），是真正的權威判定。玩家端只做型別匯入。
  */
 export class Player {
   distance = 0;

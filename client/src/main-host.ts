@@ -1,9 +1,9 @@
 import "./style.css";
-import { GameController } from "./game/GameController";
+import { HostController } from "./host/HostController";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("#app container not found");
 }
 
-new GameController(app);
+new HostController(app);

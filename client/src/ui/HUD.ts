@@ -1,4 +1,4 @@
-import { CAUGHT_TOAST_MS, INITIAL_SCORE } from "../config";
+import { CAUGHT_TOAST_MS, INITIAL_SCORE } from "shared";
 import { sfx } from "../game/audio";
 
 export type ToastVariant = "warn" | "danger" | "success" | "info";

@@ -1,5 +1,4 @@
-import { FOOT_BUTTON_LOCKOUT_MS } from "../config";
-import type { Foot } from "../game/Player";
+import { FOOT_BUTTON_LOCKOUT_MS, type Foot } from "shared";
 
 const BUTTON_BASE_STYLE = `
   pointer-events:auto; position:absolute; bottom:24px;

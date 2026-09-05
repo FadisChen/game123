@@ -1,4 +1,4 @@
-// 遊戲可調參數（對應 PRD 第 20 章）
+// 遊戲可調參數（對應 PRD 第 20 章）。前後端共用同一份，避免權威判定跟顯示動畫用到不同數值。
 export const INITIAL_SCORE = 3;
 export const GHOST_LOOK_AWAY_MIN_MS = 5000;
 export const GHOST_LOOK_AWAY_MAX_MS = 10000;
@@ -19,6 +19,13 @@ export const FAKE_TURN_DURATION_MS = GHOST_TURN_DURATION_MS * 2;
 // 最後衝刺（PRD 22.3）：距終點剩這個距離內顯示緊張提示與警示暈影
 export const FINAL_SPRINT_REMAINING_M = 10;
 
+// Phase 2：多人連線相關參數
+export const MAX_GAME_DURATION_MS = 4 * 60_000; // PRD 23.6 建議 3~5 分鐘
+export const RECONNECT_GRACE_MS = 30_000; // PRD 第 19 章
+export const SERVER_TICK_MS = 100;
+export const MAX_PLAYERS_PER_ROOM = 100;
+export const ROOM_CODE_LENGTH = 4;
+
 // 色票（對應使用者提供的美術參考圖）
 export const COLORS = {
   playerGreen: 0x118a65,
@@ -36,3 +43,6 @@ export const COLORS = {
   dollSkin: 0xffd9b3,
   dollHair: 0x3a2a1e,
 } as const;
+
+// 玩家在主辦方鳥瞰畫面上的車道顏色變體（PRD 9 章色彩參考／角色顏色變體）
+export const PLAYER_LANE_COLORS = [0x118a65, 0x2f6fed, 0x8a4fd6, 0xfdd835, 0xf4a261, 0xe639e6] as const;

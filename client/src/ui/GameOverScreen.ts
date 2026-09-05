@@ -1,8 +1,9 @@
-export type GameOutcome = "finished" | "eliminated";
+export type GameOutcome = "finished" | "eliminated" | "surviving";
 
 const OUTCOME_COPY: Record<GameOutcome, { title: string; subtitle: string; accent: string }> = {
   finished: { title: "🏆 勝利!", subtitle: "你成功抵達終點線", accent: "#118a65" },
   eliminated: { title: "❌ 你被淘汰了!", subtitle: "分數已歸零", accent: "#f94144" },
+  surviving: { title: "⏱ 遊戲結束!", subtitle: "你尚未抵達終點，但撐到了最後", accent: "#f4a261" },
 };
 
 /** 結算畫面（對應 PRD 10 章 GAME_OVER 狀態），提供再玩一次入口。 */
@@ -11,7 +12,7 @@ export class GameOverScreen {
   private readonly titleEl: HTMLHeadingElement;
   private readonly subtitleEl: HTMLParagraphElement;
 
-  constructor(container: HTMLElement, onRestart: () => void) {
+  constructor(container: HTMLElement, onRestart: () => void, buttonLabel = "再玩一次") {
     this.root = document.createElement("div");
     this.root.style.cssText = `
       position:absolute; inset:0; background:#000000cc;
@@ -33,7 +34,7 @@ export class GameOverScreen {
     card.appendChild(this.subtitleEl);
 
     const button = document.createElement("button");
-    button.textContent = "再玩一次";
+    button.textContent = buttonLabel;
     button.style.cssText = `
       pointer-events:auto; border:none; border-radius:14px; background:#118a65; color:#fff;
       font-size:20px; font-weight:700; padding:12px 32px; cursor:pointer;

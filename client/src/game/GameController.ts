@@ -1,16 +1,27 @@
-import { COUNTDOWN_SECONDS, FINAL_SPRINT_REMAINING_M, FINISH_DISTANCE_M, STEP_TWEEN_MS } from "../config";
+import {
+  COUNTDOWN_SECONDS,
+  FINAL_SPRINT_REMAINING_M,
+  FINISH_DISTANCE_M,
+  STEP_TWEEN_MS,
+  GhostAI,
+  Player,
+  type Foot,
+  type GhostState,
+} from "shared";
 import { HUD } from "../ui/HUD";
 import { TeachingScreen } from "../ui/TeachingScreen";
 import { GameOverScreen, type GameOutcome } from "../ui/GameOverScreen";
 import { Controls } from "../ui/Controls";
 import { GameScene } from "./Scene";
-import { GhostAI, type GhostState } from "./GhostAI";
-import { Player, type Foot } from "./Player";
 import { sfx } from "./audio";
 
 type GameState = "TEACHING" | "COUNTDOWN" | "PLAYING" | "GAME_OVER";
 
-/** 遊戲狀態機：TEACHING -> COUNTDOWN -> PLAYING -> GAME_OVER（對應 PRD 第 10 章，精簡房間相關狀態）。 */
+/**
+ * Phase 1 的單機本機版控制器，Phase 2 加入連線後保留給 `?offline=1` 開發旗標使用
+ * （純調美術/音效時不需要開伺服器）。正式的多人流程見 NetworkedGameController。
+ * 遊戲狀態機：TEACHING -> COUNTDOWN -> PLAYING -> GAME_OVER（對應 PRD 第 10 章，精簡房間相關狀態）。
+ */
 export class GameController {
   private readonly scene: GameScene;
   private readonly hud: HUD;

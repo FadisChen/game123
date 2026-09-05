@@ -1,0 +1,16 @@
+# Dependencies (npm workspaces hoist most of this to the repo root)
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor/OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
