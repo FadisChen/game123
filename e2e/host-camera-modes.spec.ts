@@ -50,7 +50,7 @@ async function readPersistentPlayerId(page: Page): Promise<string> {
  * 交給呼叫端決定要不要輪詢重試。
  */
 async function labelPosition(hostPage: Page, playerId: string): Promise<{ x: number; y: number } | null> {
-  const locator = hostPage.locator(`[data-player-id="${playerId}"]`);
+  const locator = hostPage.locator(`.avatar-label[data-player-id="${playerId}"]`);
   if ((await locator.count()) === 0) return null;
   return locator.evaluate((el: HTMLElement) => {
     if (el.style.display === "none") return null;
@@ -89,7 +89,8 @@ async function pollLabelDistanceFrom(
 }
 
 test("host camera modes switch correctly and keep the 3D scene alive", async ({ browser, baseURL }) => {
-  test.setTimeout(90_000);
+  // 三個 browser context 各自跑一份 WebGL 場景，在較慢的機器上光是啟動就要數十秒。
+  test.setTimeout(180_000);
   const pageErrors: string[] = [];
 
   const hostContext = await browser.newContext();
@@ -109,19 +110,25 @@ test("host camera modes switch correctly and keep the 3D scene alive", async ({ 
   const p0Id = await readPersistentPlayerId(p0);
   const p1Id = await readPersistentPlayerId(p1);
 
+  // 難度選「簡單」把鬼的安全視窗拉到最長（DIFFICULTY_PROFILES.easy.ghostLookAwayMinMs），
+  // 後面的踩腳才有足夠的餘裕在鬼回頭之前跑完；順便涵蓋了主辦方設定會實際套用到房間這條路徑。
+  const easyButton = hostPage.getByRole("button", { name: "簡單", exact: true });
+  await easyButton.click();
+  await expect(easyButton).toHaveAttribute("aria-pressed", "true");
+
   await hostPage.locator("button", { hasText: "開始遊戲" }).click();
-  await hostPage.waitForTimeout(4000); // 倒數固定 3.5 秒左右走完，進入 PLAYING
+  await hostPage.waitForTimeout(3600); // 倒數固定 3.5 秒左右走完，進入 PLAYING
 
   // 只讓 p0 前進，製造出領先/落後的明顯距離差，這樣「領先者/落後者」模式才有意義可以驗證。
-  // 鬼進入 PLAYING 後保證至少 GHOST_LOOK_AWAY_MIN_MS（5 秒）不會回頭，這裡刻意把踩腳全部
-  // 塞在那個保證安全的視窗內，避免測試偶爾撞上鬼回頭導致玩家被淘汰、按鈕消失，測試卡死重試到逾時。
+  // 踩腳全部塞在鬼進入 PLAYING 後保證不回頭的那段視窗內（見上面選「簡單」的理由），
+  // 避免撞上鬼回頭導致玩家被淘汰、按鈕消失，測試卡死重試到逾時；間隔只比按鈕鎖定時間長一點點。
   const leftBtn = p0.locator("button", { hasText: "左腳" });
   const rightBtn = p0.locator("button", { hasText: "右腳" });
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 8; i++) {
     const btn = i % 2 === 0 ? leftBtn : rightBtn;
     if (!(await btn.isVisible())) break; // 萬一真的被淘汰/抵達終點就提早停止，不要卡住重試
-    await btn.click();
-    await p0.waitForTimeout(200);
+    await btn.click({ timeout: 2000 }).catch(() => {});
+    await p0.waitForTimeout(140);
   }
 
   await expect(hostPage.locator("canvas")).toBeVisible();

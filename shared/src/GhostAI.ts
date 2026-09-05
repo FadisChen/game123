@@ -1,17 +1,15 @@
 import {
-  FAKE_TURN_CHANCE,
-  FAKE_TURN_DURATION_MS,
+  DEFAULT_ROOM_SETTINGS,
+  DIFFICULTY_PROFILES,
   FAKE_TURN_PEAK,
-  GHOST_LOOK_AWAY_MAX_MS,
-  GHOST_LOOK_AWAY_MIN_MS,
-  GHOST_LOOKING_DURATION_MS,
-  GHOST_TURN_DURATION_MS,
+  fakeTurnDurationMs,
+  type DifficultyProfile,
 } from "./config";
 
 export type GhostState = "LOOK_AWAY" | "TURNING_TO_LOOK" | "LOOKING" | "TURNING_AWAY" | "FAKE_TURN";
 
-function randomLookAwayDuration(rng: () => number): number {
-  return GHOST_LOOK_AWAY_MIN_MS + rng() * (GHOST_LOOK_AWAY_MAX_MS - GHOST_LOOK_AWAY_MIN_MS);
+function randomLookAwayDuration(rng: () => number, profile: DifficultyProfile): number {
+  return profile.ghostLookAwayMinMs + rng() * (profile.ghostLookAwayMaxMs - profile.ghostLookAwayMinMs);
 }
 
 /**
@@ -41,18 +39,25 @@ export function computeFacingAmount(state: GhostState, elapsedMs: number, durati
  * 只有 LOOKING 狀態會判定玩家移動違規（對應 PRD 8.1-8.3）。
  * LOOK_AWAY 結束時有機率轉入 FAKE_TURN（PRD 22.1 鬼的假動作），全程不會進入 LOOKING。
  *
- * rng 可注入（測試用固定序列），預設 Math.random。
+ * rng 可注入（測試用固定序列），預設 Math.random；profile 由呼叫端（GameRoom）依房間難度注入，
+ * 省略時就是預設難度，讓單機離線版與單元測試不必知道房間設定的存在。
  */
 export class GhostAI {
   private state: GhostState = "LOOK_AWAY";
   private stateStartedAt: number;
   private stateDuration: number;
   private readonly rng: () => number;
+  private readonly profile: DifficultyProfile;
 
-  constructor(now: number, rng: () => number = Math.random) {
+  constructor(
+    now: number,
+    rng: () => number = Math.random,
+    profile: DifficultyProfile = DIFFICULTY_PROFILES[DEFAULT_ROOM_SETTINGS.difficulty],
+  ) {
     this.rng = rng;
+    this.profile = profile;
     this.stateStartedAt = now;
-    this.stateDuration = randomLookAwayDuration(rng);
+    this.stateDuration = randomLookAwayDuration(rng, profile);
   }
 
   update(now: number): void {
@@ -61,21 +66,21 @@ export class GhostAI {
 
     switch (this.state) {
       case "LOOK_AWAY":
-        if (this.rng() < FAKE_TURN_CHANCE) {
-          this.transitionTo(now, "FAKE_TURN", FAKE_TURN_DURATION_MS);
+        if (this.rng() < this.profile.fakeTurnChance) {
+          this.transitionTo(now, "FAKE_TURN", fakeTurnDurationMs(this.profile));
         } else {
-          this.transitionTo(now, "TURNING_TO_LOOK", GHOST_TURN_DURATION_MS);
+          this.transitionTo(now, "TURNING_TO_LOOK", this.profile.ghostTurnDurationMs);
         }
         break;
       case "TURNING_TO_LOOK":
-        this.transitionTo(now, "LOOKING", GHOST_LOOKING_DURATION_MS);
+        this.transitionTo(now, "LOOKING", this.profile.ghostLookingDurationMs);
         break;
       case "LOOKING":
-        this.transitionTo(now, "TURNING_AWAY", GHOST_TURN_DURATION_MS);
+        this.transitionTo(now, "TURNING_AWAY", this.profile.ghostTurnDurationMs);
         break;
       case "TURNING_AWAY":
       case "FAKE_TURN":
-        this.transitionTo(now, "LOOK_AWAY", randomLookAwayDuration(this.rng));
+        this.transitionTo(now, "LOOK_AWAY", randomLookAwayDuration(this.rng, this.profile));
         break;
     }
   }

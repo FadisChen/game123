@@ -10,6 +10,10 @@ const GHOST_OFFSET_BEYOND_FINISH_M = 1;
 const BOB_HEIGHT_M = 0.06;
 const SHAKE_DURATION_MS = 220;
 const SHAKE_MAGNITUDE_M = 0.05;
+/** 自己被淘汰時的倒地鏡頭：跟其他玩家身上的倒地動畫同長度，看起來才是同一件事。 */
+const COLLAPSE_DURATION_MS = 700;
+const COLLAPSE_ROLL_RAD = 1.35;
+const COLLAPSE_EYE_HEIGHT_M = 0.3;
 
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
@@ -35,6 +39,13 @@ export class GameScene {
   private tweenFoot: Foot = "left";
 
   private shakeStartedAt = -Infinity;
+  private collapseStartedAt: number | null = null;
+  /**
+   * 建構子 lookAt() 之後的相機朝向。倒地動畫一律從這個四元數重新算起，
+   * 而不是去寫 camera.rotation.z——看向 +Z 的 lookAt 產生的 Euler 是 (π, 0, π) 這種表示法，
+   * 直接覆寫其中的 z 分量會把整個場景轉成上下顛倒。
+   */
+  private readonly baseQuaternion = new THREE.Quaternion();
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -44,6 +55,7 @@ export class GameScene {
     this.camera = new THREE.PerspectiveCamera(55, this.aspect(), 0.1, 200);
     this.camera.position.set(0, CAMERA_HEIGHT_M, 0);
     this.camera.lookAt(0, CAMERA_HEIGHT_M, 1);
+    this.baseQuaternion.copy(this.camera.quaternion);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -58,7 +70,7 @@ export class GameScene {
     const ghostZ = FINISH_DISTANCE_M + GHOST_OFFSET_BEYOND_FINISH_M;
     this.ghostVisual = new GhostVisual(this.scene, new THREE.Vector3(0, 0, ghostZ));
 
-    this.avatars = new PlayerAvatars(this.scene);
+    this.avatars = new PlayerAvatars(this.scene, { showNames: true });
     this.buildHands();
     new ResizeObserver(() => this.handleResize()).observe(container);
   }
@@ -91,14 +103,26 @@ export class GameScene {
     this.shakeStartedAt = now;
   }
 
+  /** 自己被淘汰：鏡頭側倒並沉到地面高度，之後就停在那裡直到下一回合。 */
+  playCollapse(now: number): void {
+    this.collapseStartedAt = now;
+  }
+
+  /** 新回合開始時把倒地的鏡頭扶正。 */
+  resetCollapse(): void {
+    this.collapseStartedAt = null;
+    this.camera.quaternion.copy(this.baseQuaternion);
+  }
+
   setCameraDistanceImmediate(distance: number): void {
     this.cameraDistance = distance;
     this.tweenActive = false;
     this.camera.position.z = playerWorldZ(this.playerIndex, distance);
   }
 
-  /** 每幀呼叫：推進攝影機補間、踏步擺動與震動效果。 */
+  /** 每幀呼叫：推進攝影機補間、踏步擺動、震動效果，以及其他玩家的出局倒地動畫。 */
   updateAnimations(now: number): void {
+    this.avatars.animate(now);
     let bobOffset = 0;
     let lateralOffset = 0;
 
@@ -118,9 +142,18 @@ export class GameScene {
       shakeOffset = Math.sin(t * Math.PI * 6) * SHAKE_MAGNITUDE_M * (1 - t);
     }
 
+    let collapse = 0;
+    if (this.collapseStartedAt !== null) {
+      collapse = easeOutCubic(Math.min(Math.max(now - this.collapseStartedAt, 0) / COLLAPSE_DURATION_MS, 1));
+    }
+
     this.camera.position.z = playerWorldZ(this.playerIndex, this.cameraDistance);
-    this.camera.position.y = CAMERA_HEIGHT_M + bobOffset;
+    this.camera.position.y = CAMERA_HEIGHT_M + bobOffset - (CAMERA_HEIGHT_M - COLLAPSE_EYE_HEIGHT_M) * collapse;
     this.camera.position.x = this.laneX + lateralOffset + shakeOffset;
+    if (collapse > 0) {
+      this.camera.quaternion.copy(this.baseQuaternion);
+      this.camera.rotateZ(COLLAPSE_ROLL_RAD * collapse); // local space 的側傾，等同於「頭歪向一邊」
+    }
     this.hands.position.y = -0.13 + bobOffset * 0.3;
   }
 

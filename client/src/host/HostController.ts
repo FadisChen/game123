@@ -18,6 +18,8 @@ export class HostController {
   private readonly ghostReplica = new GhostReplicaAI(0);
   private readonly hostId = getPersistentHostId();
   private readonly players = new Map<string, PlayerSummary>();
+  /** 上一幀每位玩家的勝負狀態，用來偵測「剛出局／剛抵達」的那一瞬間好放特效。 */
+  private readonly lastOutcome = new Map<string, "active" | "eliminated" | "finished">();
 
   private scene: HostScene | null = null;
   private panel: HostConsolePanel | null = null;
@@ -52,6 +54,7 @@ export class HostController {
       onRestart: () => void this.socketClient.restartGame(this.actionPayload()),
       onCameraModeChange: (mode) => this.scene?.setCameraMode(mode),
       onCameraDirection: (direction, pressed) => this.scene?.setDirectionPressed(direction, pressed),
+      onSettingsChange: (settings) => void this.socketClient.updateSettings({ ...this.actionPayload(), settings }),
     });
     this.scene.onCameraModeChange = (mode) => this.panel?.setActiveCameraMode(mode);
 
@@ -92,6 +95,7 @@ export class HostController {
     this.players.clear();
     for (const player of snapshot.players) this.players.set(player.playerId, player);
 
+    this.panel?.setSettings(snapshot.settings);
     this.panel?.setPhase(snapshot.phase);
     this.refreshPlayerViews();
   }
@@ -121,6 +125,27 @@ export class HostController {
     this.refreshPlayerViews();
   }
 
+  /**
+   * 統一在這裡 diff 而不是在 handlePlayerStepped()：出局有三條路徑（自己踏步被抓、
+   * 斷線寬限期到期、以及重連後才收到的完整快照），全部都會流經玩家清單的更新。
+   */
+  private syncOutcomeEffects(players: PlayerSummary[]): void {
+    const seen = new Set<string>();
+    for (const player of players) {
+      seen.add(player.playerId);
+      const outcome = player.finished ? "finished" : player.eliminated ? "eliminated" : "active";
+      const previous = this.lastOutcome.get(player.playerId);
+      this.lastOutcome.set(player.playerId, outcome);
+      // 第一次見到這位玩家時只記錄狀態不放特效，否則主辦方重新整理頁面會被補放一整批。
+      if (previous === undefined || previous === outcome || outcome === "active") continue;
+      this.scene?.playOutcomeEffect(player.playerId, outcome);
+      this.panel?.flashPlayer(player.playerId, outcome);
+    }
+    for (const id of [...this.lastOutcome.keys()]) {
+      if (!seen.has(id)) this.lastOutcome.delete(id);
+    }
+  }
+
   private refreshPlayerViews(): void {
     this.playersDirty = true;
   }
@@ -133,6 +158,8 @@ export class HostController {
         const players = [...this.players.values()];
         this.panel?.setPlayers(players);
         this.scene.updateAvatars(players);
+        // 特效要拿角色在場上的座標，所以一定得排在 updateAvatars() 之後。
+        this.syncOutcomeEffects(players);
       }
       const serverNow = this.clock.nowServerMs();
       const isLooking = this.ghostReplica.isLooking();

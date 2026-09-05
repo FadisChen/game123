@@ -86,3 +86,27 @@ test("reset() restores initial state", () => {
   assert.equal(player.eliminated, false);
   assert.equal(player.finished, false);
 });
+
+test("an injected maxScore of 1 means a single catch eliminates the player", () => {
+  const looking = { current: true };
+  const player = new Player(makeGhost(looking), 1);
+  assert.equal(player.score, 1);
+  assert.deepEqual(player.step("left"), { kind: "caught", scoreAfter: 0, eliminated: true });
+});
+
+test("an injected stepDistanceM overrides the default step length", () => {
+  const looking = { current: false };
+  const player = new Player(makeGhost(looking), 3, 0.25);
+  assert.deepEqual(player.step("left"), { kind: "advanced", distanceAfter: 0.25, finished: false });
+});
+
+test("configure() applies new room settings and resets the player to the new max score", () => {
+  const looking = { current: true };
+  const player = new Player(makeGhost(looking), 3, 0.4);
+  player.step("left"); // score 3 -> 2
+  player.configure(2, 0.25);
+  assert.equal(player.score, 2);
+  assert.equal(player.lastFoot, null);
+  looking.current = false;
+  assert.deepEqual(player.step("left"), { kind: "advanced", distanceAfter: 0.25, finished: false });
+});

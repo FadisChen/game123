@@ -3,12 +3,18 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { FINISH_DISTANCE_M } from "shared";
 import { buildFieldEnvironment, lightScene } from "../game/fieldEnvironment";
 import { GhostVisual } from "../game/ghostVisual";
+import { OutcomeEffects } from "../game/OutcomeEffects";
 import { PlayerAvatars, playerLaneX, playerWorldZ } from "../game/PlayerAvatars";
 
 const GHOST_OFFSET_BEYOND_FINISH_M = 1;
 
-const BIRDSEYE_POSITION = new THREE.Vector3(0, 29, -19);
-const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FINISH_DISTANCE_M * 0.48);
+/**
+ * 預設機位刻意壓低成接近賽道高度的斜角，而不是正上方俯瞰：這個角度看得到地平線與鬼的正面，
+ * 投影給現場觀眾看時比高空俯瞰更有臨場感。往後退到 -18 是為了讓最外側車道（±9.5m）的玩家
+ * 站在起點時仍落在水平視野內——再往前就會被畫面左右邊緣裁掉。
+ */
+const BIRDSEYE_POSITION = new THREE.Vector3(0, 9, -18);
+const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FINISH_DISTANCE_M * 0.75);
 const FOLLOW_HEIGHT_M = 9;
 const FOLLOW_BACK_OFFSET_M = 7;
 const FOLLOW_LOOKAHEAD_M = 5;
@@ -42,6 +48,7 @@ export class HostScene {
   private readonly container: HTMLElement;
   private readonly ghostVisual: GhostVisual;
   private readonly avatars: PlayerAvatars;
+  private readonly outcomeEffects: OutcomeEffects;
   private readonly labelsContainer: HTMLDivElement;
   private readonly labelEls = new Map<string, HTMLDivElement>();
   private readonly latestAvatars = new Map<string, { x: number; z: number; player: HostAvatarInput }>();
@@ -76,6 +83,7 @@ export class HostScene {
     this.ghostVisual = new GhostVisual(this.scene, new THREE.Vector3(0, 0, ghostZ));
 
     this.avatars = new PlayerAvatars(this.scene);
+    this.outcomeEffects = new OutcomeEffects(this.scene);
 
     this.labelsContainer = document.createElement("div");
     this.labelsContainer.style.cssText = "position:absolute; inset:0; pointer-events:none;";
@@ -133,6 +141,15 @@ export class HostScene {
     for (const id of this.latestAvatars.keys()) {
       if (!seenIds.has(id)) this.latestAvatars.delete(id);
     }
+  }
+
+  /** 在某位玩家目前站的位置放一次出局／抵達特效；還沒進過 updateAvatars 的玩家就跳過。 */
+  playOutcomeEffect(playerId: string, outcome: "eliminated" | "finished"): void {
+    const avatar = this.latestAvatars.get(playerId);
+    if (!avatar) return;
+    const now = performance.now();
+    if (outcome === "eliminated") this.outcomeEffects.spawnElimination(avatar.x, avatar.z, now);
+    else this.outcomeEffects.spawnFinish(avatar.x, avatar.z, now);
   }
 
   /** 切換鏡頭模式（PRD 22.4）；birdseye 立刻回正機位，free 才會啟用滑鼠拖曳/縮放。 */
@@ -227,7 +244,7 @@ export class HostScene {
     }
 
     const status = player.finished ? "🏆" : player.eliminated ? "💀" : !player.connected ? "📴" : player.boosted ? "⚡" : "";
-    el.textContent = `${player.name} ${status} ${"❤️".repeat(Math.max(player.score, 0))}`;
+    el.textContent = `${player.name} ${status}`.trim();
 
     this.positionLabel(el, worldX, worldZ);
   }
@@ -256,6 +273,8 @@ export class HostScene {
 
   render(): void {
     const now = performance.now();
+    this.avatars.animate(now);
+    this.outcomeEffects.update(now);
     this.updateCameraFollow(Math.min((now - this.previousFrame) / 1000, 0.05));
     this.previousFrame = now;
     this.repositionLabels();

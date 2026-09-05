@@ -1,21 +1,24 @@
 import {
   COUNTDOWN_SECONDS,
+  DEFAULT_ROOM_SETTINGS,
+  DIFFICULTY_PROFILES,
   GhostAI,
   MAX_GAME_DURATION_MS,
   MAX_PLAYERS_PER_ROOM,
   Player,
   RECONNECT_GRACE_MS,
-  SPEED_BOOST_CHANCE,
   SPEED_BOOST_CHECK_INTERVAL_MS,
   SPEED_BOOST_DURATION_MS,
   SPEED_BOOST_MULTIPLIER,
   computeRanking,
+  type DifficultyProfile,
   type Foot,
   type GameOverReason,
   type JoinErrorCode,
   type PlayerSummary,
   type RankedPlayer,
   type RoomPhase,
+  type RoomSettings,
   type RoomStateSnapshot,
   type StepErrorCode,
   type StepResultMsg,
@@ -68,6 +71,7 @@ export class GameRoom {
   phase: RoomPhase = "WAITING";
   players = new Map<string, ServerPlayerState>();
   ghost: GhostAI | null = null;
+  settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS };
 
   private countdownValue: number | "GO" = COUNTDOWN_SECONDS;
   private countdownDeadlineAt: number | null = null;
@@ -90,6 +94,23 @@ export class GameRoom {
     this.hostId = hostId;
     this.rng = rng;
     this.boostRng = boostRng;
+  }
+
+  private get profile(): DifficultyProfile {
+    return DIFFICULTY_PROFILES[this.settings.difficulty];
+  }
+
+  /**
+   * 主辦方調整這一場的血量／難度。只在 WAITING 階段開放：開打後才換數值會讓已經扣過血的玩家
+   * 跟後來的判定基準不一致。套用後把已在房裡的玩家一併重設，確保所有人起始血量相同。
+   */
+  updateSettings(settings: RoomSettings): { ok: true } | { ok: false; error: string } {
+    if (this.phase !== "WAITING") return { ok: false, error: "ROOM_NOT_WAITING" };
+    this.settings = settings;
+    for (const p of this.players.values()) {
+      p.player.configure(settings.maxScore, this.profile.stepDistanceM);
+    }
+    return { ok: true };
   }
 
   /** 加入或重新加入房間。同一個 playerId 已存在時一律視為重連，不受「開始後禁止加入」限制。 */
@@ -117,7 +138,11 @@ export class GameRoom {
       return { ok: false, error: "ROOM_FULL" };
     }
 
-    const player = new Player({ isLooking: () => this.ghost?.isLooking() ?? false });
+    const player = new Player(
+      { isLooking: () => this.ghost?.isLooking() ?? false },
+      this.settings.maxScore,
+      this.profile.stepDistanceM,
+    );
     this.players.set(playerId, {
       playerId,
       name: trimmed,
@@ -306,7 +331,7 @@ export class GameRoom {
 
       if (now >= p.nextBoostRollAt) {
         p.nextBoostRollAt = now + SPEED_BOOST_CHECK_INTERVAL_MS;
-        if (p.boostActiveUntil === null && this.boostRng() < SPEED_BOOST_CHANCE) {
+        if (p.boostActiveUntil === null && this.boostRng() < this.profile.speedBoostChance) {
           p.boostActiveUntil = now + SPEED_BOOST_DURATION_MS;
           events.push({ type: "playerBoostChanged", playerId: p.playerId, boosted: true, untilMs: p.boostActiveUntil });
         }
@@ -320,7 +345,7 @@ export class GameRoom {
 
   private beginPlaying(now: number): void {
     this.phase = "PLAYING";
-    this.ghost = new GhostAI(now, this.rng);
+    this.ghost = new GhostAI(now, this.rng, this.profile);
     this.roundStartedAt = now;
     this.roundDeadlineAt = now + MAX_GAME_DURATION_MS;
     for (const p of this.players.values()) {
@@ -384,6 +409,7 @@ export class GameRoom {
       serverNowMs: now,
       roundStartedAtMs: this.roundStartedAt ?? undefined,
       roundDeadlineMs: this.roundDeadlineAt ?? undefined,
+      settings: this.settings,
     };
   }
 

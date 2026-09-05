@@ -5,6 +5,10 @@ node_modules/
 dist/
 dist-ssr/
 
+# Playwright
+test-results/
+playwright-report/
+
 # Logs
 *.log
 npm-debug.log*

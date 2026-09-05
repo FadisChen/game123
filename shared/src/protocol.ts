@@ -1,3 +1,4 @@
+import type { RoomSettings } from "./config";
 import type { Foot } from "./Player";
 import type { GhostState } from "./GhostAI";
 import type { RankedPlayer } from "./ranking";
@@ -50,6 +51,8 @@ export interface RoomStateSnapshot {
   serverNowMs: number;
   roundStartedAtMs?: number;
   roundDeadlineMs?: number;
+  /** 主辦方為這一場設定的血量與難度；玩家端只用 maxScore 決定 HUD 上要畫幾格愛心。 */
+  settings: RoomSettings;
 }
 
 export type StepResultMsg =
@@ -69,6 +72,10 @@ export interface HostRoomActionPayload {
   hostId: HostId;
 }
 export type HostRoomActionAck = { ok: true } | { ok: false; error: string };
+
+export interface HostUpdateSettingsPayload extends HostRoomActionPayload {
+  settings: RoomSettings;
+}
 
 export interface PlayerJoinRoomPayload {
   roomCode: RoomCode;
@@ -92,6 +99,8 @@ export interface RoomPhaseChangedPayload {
   serverNowMs: number;
   roundStartedAtMs?: number;
   roundDeadlineMs?: number;
+  /** 主辦方為這一場設定的血量與難度；玩家端只用 maxScore 決定 HUD 上要畫幾格愛心。 */
+  settings: RoomSettings;
 }
 
 export interface RoomCountdownTickPayload {
@@ -133,6 +142,7 @@ export const SOCKET_EVENTS = {
   hostResumeGame: "host:resumeGame",
   hostEndGame: "host:endGame",
   hostRestartGame: "host:restartGame",
+  hostUpdateSettings: "host:updateSettings",
   playerJoinRoom: "player:joinRoom",
   playerStep: "player:step",
 

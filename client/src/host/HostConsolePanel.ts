@@ -1,5 +1,15 @@
 import QRCode from "qrcode";
-import { FINISH_DISTANCE_M, type GhostState, type PlayerSummary, type RankedPlayer, type RoomPhase } from "shared";
+import {
+  DEFAULT_ROOM_SETTINGS,
+  FINISH_DISTANCE_M,
+  SCORE_OPTIONS,
+  type DifficultyLevel,
+  type GhostState,
+  type PlayerSummary,
+  type RankedPlayer,
+  type RoomPhase,
+  type RoomSettings,
+} from "shared";
 import type { HostCameraMode } from "./HostScene";
 import { playerLaneX, playerWorldZ } from "../game/PlayerAvatars";
 import { SignalStatus } from "../ui/SignalStatus";
@@ -12,6 +22,7 @@ export interface HostConsolePanelCallbacks {
   onRestart: () => void;
   onCameraModeChange: (mode: HostCameraMode) => void;
   onCameraDirection: (direction: string, pressed: boolean) => void;
+  onSettingsChange: (settings: RoomSettings) => void;
 }
 
 const CAMERA_MODE_OPTIONS: { mode: HostCameraMode; label: string }[] = [
@@ -19,6 +30,11 @@ const CAMERA_MODE_OPTIONS: { mode: HostCameraMode; label: string }[] = [
   { mode: "leader", label: "領先者" },
   { mode: "last", label: "落後者" },
   { mode: "free", label: "自由鏡頭" },
+];
+const DIFFICULTY_LABEL: { level: DifficultyLevel; label: string }[] = [
+  { level: "easy", label: "簡單" },
+  { level: "normal", label: "普通" },
+  { level: "hard", label: "困難" },
 ];
 const PHASE_LABEL: Record<RoomPhase, string> = {
   WAITING: "等待玩家加入", COUNTDOWN: "即將開始", PLAYING: "遊戲進行中", PAUSED: "遊戲已暫停", GAME_OVER: "本局已結束",
@@ -34,12 +50,19 @@ export class HostConsolePanel {
   private readonly rankingOverlay = document.createElement("div");
   private readonly rankingListEl = document.createElement("div");
   private readonly roomDetails = document.createElement("details");
+  private readonly settingsSection: HTMLElement;
   private readonly cameraModeButtons = new Map<HostCameraMode, HTMLButtonElement>();
   private readonly actionButtons = new Map<string, HTMLButtonElement>();
+  private readonly scoreButtons = new Map<number, HTMLButtonElement>();
+  private readonly difficultyButtons = new Map<DifficultyLevel, HTMLButtonElement>();
+  private settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS };
   private readonly mapPlayers = document.createElementNS(SVG_NS, "g");
   private readonly cameraCone = document.createElementNS(SVG_NS, "path");
   private readonly cameraDot = document.createElementNS(SVG_NS, "circle");
   private phase: RoomPhase = "WAITING";
+  /** setPlayers() 每次都重建整份名單，所以「剛出局／剛抵達」的高亮要記在這裡才能撐過重建。 */
+  private readonly flashing = new Map<string, "eliminated" | "finished">();
+  private lastPlayers: PlayerSummary[] = [];
 
   constructor(container: HTMLElement, roomCode: string, joinUrl: string, callbacks: HostConsolePanelCallbacks) {
     this.root.className = "host-panel";
@@ -66,6 +89,17 @@ export class HostConsolePanel {
       this.actionButtons.set(key, button);
     }
     status.appendChild(actions);
+
+    // 只在 WAITING 階段開放（見 setPhase）：開打後才換數值會讓已經扣過血的玩家跟判定基準不一致。
+    const settings = this.section("遊戲設定");
+    this.settingsSection = settings;
+    settings.append(this.settingRow("每人血量", SCORE_OPTIONS, this.scoreButtons, (value) => String(value), (maxScore) =>
+      callbacks.onSettingsChange({ ...this.settings, maxScore }),
+    ));
+    settings.append(this.settingRow("難度", DIFFICULTY_LABEL.map((d) => d.level), this.difficultyButtons,
+      (level) => DIFFICULTY_LABEL.find((d) => d.level === level)!.label,
+      (difficulty) => callbacks.onSettingsChange({ ...this.settings, difficulty }),
+    ));
 
     const camera = this.section("鏡頭控制");
     const modes = document.createElement("div");
@@ -168,6 +202,7 @@ export class HostConsolePanel {
     });
     container.append(this.root, this.rankingOverlay);
     this.setActiveCameraMode("birdseye");
+    this.setSettings(this.settings);
     this.setPhase("WAITING");
   }
 
@@ -179,6 +214,27 @@ export class HostConsolePanel {
     section.appendChild(heading);
     this.root.appendChild(section);
     return section;
+  }
+
+  /** 一列「標題 + 一排互斥切換鈕」，選取狀態用 aria-pressed 表示（沿用鏡頭模式那排的樣式與語意）。 */
+  private settingRow<T>(
+    title: string,
+    values: readonly T[],
+    registry: Map<T, HTMLButtonElement>,
+    labelOf: (value: T) => string,
+    onPick: (value: T) => void,
+  ): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "setting-row";
+    const heading = document.createElement("span");
+    heading.textContent = title;
+    const buttons = document.createElement("div");
+    buttons.className = "camera-modes setting-options";
+    for (const value of values) {
+      registry.set(value, this.buildButton(buttons, labelOf(value), () => onPick(value)));
+    }
+    row.append(heading, buttons);
+    return row;
   }
 
   private buildButton(row: HTMLElement, label: string, onClick: () => void): HTMLButtonElement {
@@ -194,6 +250,12 @@ export class HostConsolePanel {
     for (const [buttonMode, button] of this.cameraModeButtons) button.setAttribute("aria-pressed", String(buttonMode === mode));
   }
 
+  setSettings(settings: RoomSettings): void {
+    this.settings = settings;
+    for (const [value, button] of this.scoreButtons) button.setAttribute("aria-pressed", String(value === settings.maxScore));
+    for (const [level, button] of this.difficultyButtons) button.setAttribute("aria-pressed", String(level === settings.difficulty));
+  }
+
   setPhase(phase: RoomPhase): void {
     if (phase !== this.phase) this.roomDetails.open = phase === "WAITING";
     this.phase = phase;
@@ -202,6 +264,11 @@ export class HostConsolePanel {
       const enabled = key === "start" ? phase === "WAITING" : key === "pause" ? phase === "PLAYING" : key === "resume" ? phase === "PAUSED" : key === "restart" ? phase === "GAME_OVER" : phase !== "WAITING" && phase !== "GAME_OVER";
       button.disabled = !enabled;
       button.hidden = !enabled;
+    }
+    // 開打後設定就鎖住了，整塊收起來把版面讓給鏡頭控制與玩家名單。
+    this.settingsSection.hidden = phase !== "WAITING";
+    for (const button of [...this.scoreButtons.values(), ...this.difficultyButtons.values()]) {
+      button.disabled = phase !== "WAITING";
     }
     if (phase === "WAITING") this.rankingOverlay.hidden = true;
   }
@@ -215,6 +282,7 @@ export class HostConsolePanel {
   }
 
   setPlayers(players: PlayerSummary[]): void {
+    this.lastPlayers = players;
     const alive = players.filter((player) => !player.eliminated).length;
     this.countEl.innerHTML = `<span>存活玩家</span><div><strong>${alive}</strong><span> / ${players.length}</span></div>`;
     this.playerListEl.replaceChildren();
@@ -223,6 +291,9 @@ export class HostConsolePanel {
     players.forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "host-player-row";
+      row.dataset.playerId = player.playerId;
+      const flash = this.flashing.get(player.playerId);
+      if (flash) row.classList.add(flash === "finished" ? "row-flash-win" : "row-flash-out");
       const name = document.createElement("span");
       name.textContent = `${String(index + 1).padStart(3, "0")}  ${player.name}`;
       const status = document.createElement("span");
@@ -236,6 +307,16 @@ export class HostConsolePanel {
       dot.setAttribute("fill", player.eliminated ? "#e7908c" : "#8eecb0");
       this.mapPlayers.appendChild(dot);
     });
+  }
+
+  /** 名單上高亮剛出局／剛抵達的那一列，讓主持人在幾十個人裡找得到是誰。 */
+  flashPlayer(playerId: string, outcome: "eliminated" | "finished"): void {
+    this.flashing.set(playerId, outcome);
+    this.setPlayers(this.lastPlayers);
+    window.setTimeout(() => {
+      this.flashing.delete(playerId);
+      this.setPlayers(this.lastPlayers);
+    }, 2000);
   }
 
   setCameraView(position: { x: number; z: number }, target: { x: number; z: number }): void {

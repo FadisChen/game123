@@ -13,7 +13,9 @@ export class HUD {
   private readonly sprintBannerEl = document.createElement("div");
   private readonly vignetteEl = document.createElement("div");
   private readonly playersEl = document.createElement("div");
+  private readonly outcomeEl = document.createElement("div");
   private readonly signal = new SignalStatus();
+  private maxScore = INITIAL_SCORE;
   private toastTimer: number | undefined;
   private sprintBannerTimer: number | undefined;
 
@@ -34,10 +36,13 @@ export class HUD {
     this.vignetteEl.className = "sprint-vignette";
     this.vignetteEl.hidden = true;
     this.playersEl.className = "player-survivors survivor-count";
+    this.outcomeEl.className = "outcome-overlay";
+    this.outcomeEl.setAttribute("role", "status");
+    this.outcomeEl.hidden = true;
     const crosshair = document.createElement("div");
     crosshair.className = "crosshair";
     crosshair.setAttribute("aria-hidden", "true");
-    this.root.append(this.signal.root, this.scoreEl, this.playersEl, this.muteButton, crosshair, this.countdownEl, this.toastEl, this.sprintBannerEl, this.vignetteEl);
+    this.root.append(this.signal.root, this.scoreEl, this.playersEl, this.muteButton, crosshair, this.countdownEl, this.toastEl, this.sprintBannerEl, this.vignetteEl, this.outcomeEl);
     container.appendChild(this.root);
     this.setScore(INITIAL_SCORE);
     this.setPlayerCount(1, 1);
@@ -49,9 +54,26 @@ export class HUD {
     this.muteButton.setAttribute("aria-pressed", String(muted));
   }
 
-  setScore(score: number): void {
-    this.scoreEl.textContent = Array.from({ length: INITIAL_SCORE }, (_, i) => i < score ? "♥" : "♡").join(" ");
-    this.scoreEl.setAttribute("aria-label", `剩餘 ${score} 分`);
+  /** maxScore 決定要畫幾格愛心；主辦方可以每場調整（1~3），省略時沿用預設難度的血量。 */
+  setScore(score: number, maxScore = this.maxScore): void {
+    this.maxScore = maxScore;
+    this.scoreEl.textContent = Array.from({ length: maxScore }, (_, i) => i < score ? "♥" : "♡").join(" ");
+    this.scoreEl.setAttribute("aria-label", `剩餘 ${score} 分，共 ${maxScore} 分`);
+  }
+
+  /**
+   * 個人勝負的全螢幕反饋。純視覺，不放文字——WaitingScreen 隨後就會蓋上來說明狀態，
+   * 兩邊都寫一次只是重複，而且卡片本來就會擋住底下的字。
+   */
+  showOutcomeOverlay(outcome: "eliminated" | "finished"): void {
+    this.outcomeEl.dataset.outcome = outcome;
+    this.outcomeEl.hidden = false;
+    navigator.vibrate?.(outcome === "finished" ? [40, 40, 120] : [80, 60, 80]);
+  }
+
+  clearOutcomeOverlay(): void {
+    this.outcomeEl.hidden = true;
+    delete this.outcomeEl.dataset.outcome;
   }
 
   setPlayers(players: PlayerSummary[]): void {

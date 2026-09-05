@@ -128,7 +128,7 @@ export class NetworkedGameController {
     }
     const mine = snapshot.players.find((p) => p.playerId === this.playerId);
     if (mine) {
-      this.hud.setScore(mine.score);
+      this.hud.setScore(mine.score, snapshot.settings.maxScore);
       this.scene.setCameraDistanceImmediate(mine.distance);
       // 重連時可能已經在上一次連線期間被淘汰/抵達終點，用快照補回這個狀態。
       this.myOutcome = mine.finished ? "finished" : mine.eliminated ? "eliminated" : "active";
@@ -155,6 +155,8 @@ export class NetworkedGameController {
         this.myOutcome = "active"; // 新回合開始，個人結果重置
         this.finalSprintTriggered = false;
         this.hud.resetFinalSprint();
+        this.hud.clearOutcomeOverlay();
+        this.scene.resetCollapse();
         this.teaching.setVisible(false);
         this.waiting.setVisible(false);
         this.gameOver.hide();
@@ -225,6 +227,8 @@ export class NetworkedGameController {
         sfx.play(result.eliminated ? "eliminated" : "caught");
         if (result.eliminated) {
           this.myOutcome = "eliminated";
+          this.hud.showOutcomeOverlay("eliminated");
+          this.scene.playCollapse(now);
           this.syncScreensToPhase();
         }
         break;
@@ -235,6 +239,7 @@ export class NetworkedGameController {
         if (result.finished) {
           sfx.play("victory");
           this.myOutcome = "finished";
+          this.hud.showOutcomeOverlay("finished");
           this.syncScreensToPhase();
         }
         break;

@@ -6,6 +6,7 @@ import {
   type HostCreateRoomPayload,
   type HostRoomActionAck,
   type HostRoomActionPayload,
+  type HostUpdateSettingsPayload,
   type PlayerJoinRoomAck,
   type PlayerJoinRoomPayload,
   type PlayerStepAck,
@@ -76,6 +77,9 @@ export class SocketClient {
   }
   restartGame(payload: HostRoomActionPayload): Promise<HostRoomActionAck> {
     return this.emitAck(SOCKET_EVENTS.hostRestartGame, payload);
+  }
+  updateSettings(payload: HostUpdateSettingsPayload): Promise<HostRoomActionAck> {
+    return this.emitAck(SOCKET_EVENTS.hostUpdateSettings, payload);
   }
   joinRoom(payload: PlayerJoinRoomPayload): Promise<PlayerJoinRoomAck> {
     return this.emitAck(SOCKET_EVENTS.playerJoinRoom, payload);

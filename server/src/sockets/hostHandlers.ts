@@ -1,10 +1,12 @@
 import type { Server, Socket } from "socket.io";
 import {
   SOCKET_EVENTS,
+  normalizeRoomSettings,
   type HostCreateRoomAck,
   type HostCreateRoomPayload,
   type HostRoomActionAck,
   type HostRoomActionPayload,
+  type HostUpdateSettingsPayload,
 } from "shared";
 import type { GameRoom } from "../rooms/GameRoom";
 import type { RoomManager } from "../rooms/RoomManager";
@@ -67,5 +69,11 @@ export function registerHostHandlers(io: Server, socket: Socket, roomManager: Ro
 
   socket.on(SOCKET_EVENTS.hostRestartGame, (payload: HostRoomActionPayload, ack: (res: HostRoomActionAck) => void) => {
     withHostRoom(io, roomManager, payload, ack, (room) => room.restart());
+  });
+
+  socket.on(SOCKET_EVENTS.hostUpdateSettings, (payload: HostUpdateSettingsPayload, ack: (res: HostRoomActionAck) => void) => {
+    // 走 withHostRoom 是為了沿用它的主辦方身分驗證與「套用後廣播完整快照」——玩家端就是靠這份
+    // 快照裡的 settings.maxScore 決定 HUD 要畫幾格愛心。
+    withHostRoom(io, roomManager, payload, ack, (room) => room.updateSettings(normalizeRoomSettings(payload.settings)));
   });
 }
