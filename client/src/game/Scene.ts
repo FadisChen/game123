@@ -6,7 +6,7 @@ import { colorHex, createBillboardSprite } from "./spriteUtils";
 import { GhostVisual } from "./ghostVisual";
 
 const CAMERA_HEIGHT_M = 1.6;
-const GHOST_OFFSET_FROM_FINISH_M = 2;
+const GHOST_OFFSET_BEYOND_FINISH_M = 1;
 const BOB_HEIGHT_M = 0.06;
 const SHAKE_DURATION_MS = 220;
 const SHAKE_MAGNITUDE_M = 0.05;
@@ -55,7 +55,7 @@ export class GameScene {
 
     buildFieldEnvironment(this.scene);
 
-    const ghostZ = FINISH_DISTANCE_M - GHOST_OFFSET_FROM_FINISH_M;
+    const ghostZ = FINISH_DISTANCE_M + GHOST_OFFSET_BEYOND_FINISH_M;
     this.ghostVisual = new GhostVisual(this.scene, new THREE.Vector3(0, 0, ghostZ));
 
     const guardTexture = drawGuard(colorHex(COLORS.guardMagenta));

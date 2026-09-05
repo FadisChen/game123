@@ -88,6 +88,15 @@ npm run build       # 編譯 server（型別檢查）＋ build client（含 play
 npm test            # 跑 shared 與 server 的單元測試（node --test，用 tsx 直接跑 TS）
 ```
 
+### 疑難排解：Windows 上 `npm run dev` 一啟動就掛掉
+
+如果 `[client]` 那行噴出 `Cannot find native binding` / `Cannot find module '@rolldown/binding-win32-x64-msvc'`，是 npm optional dependencies 的已知 bug（[npm/cli#4828](https://github.com/npm/cli/issues/4828)）：Vite 8 內建的 rolldown 需要對應平台的 native binding，但 npm 有時候不會把它裝進去。解法是清掉 lockfile 跟所有 `node_modules` 再重裝一次：
+
+```bash
+rm -rf node_modules package-lock.json client/node_modules server/node_modules shared/node_modules
+npm install
+```
+
 單一 workspace 也可以個別操作，例如 `npm run dev -w server`、`npm test -w shared`。
 
 ### 環境變數

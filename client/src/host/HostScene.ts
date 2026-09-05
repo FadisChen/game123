@@ -4,7 +4,7 @@ import { COLORS, FINISH_DISTANCE_M, MAX_PLAYERS_PER_ROOM, PLAYER_LANE_COLORS } f
 import { buildFieldEnvironment, PATH_HALF_WIDTH_M } from "../game/fieldEnvironment";
 import { GhostVisual } from "../game/ghostVisual";
 
-const GHOST_OFFSET_FROM_FINISH_M = 2;
+const GHOST_OFFSET_BEYOND_FINISH_M = 1;
 const AVATAR_HEIGHT_M = 0.35;
 const LANE_SPREAD_M = PATH_HALF_WIDTH_M * 1.6;
 
@@ -75,7 +75,7 @@ export class HostScene {
 
     buildFieldEnvironment(this.scene);
 
-    const ghostZ = FINISH_DISTANCE_M - GHOST_OFFSET_FROM_FINISH_M;
+    const ghostZ = FINISH_DISTANCE_M + GHOST_OFFSET_BEYOND_FINISH_M;
     this.ghostVisual = new GhostVisual(this.scene, new THREE.Vector3(0, 0, ghostZ));
 
     const geometry = new THREE.CapsuleGeometry(0.22, 0.5, 4, 8);

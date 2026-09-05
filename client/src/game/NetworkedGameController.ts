@@ -74,7 +74,7 @@ export class NetworkedGameController {
     this.wireSocketEvents();
     this.applySnapshot(initialSnapshot);
 
-    requestAnimationFrame((now) => this.loop(now));
+    requestAnimationFrame(() => this.loop());
   }
 
   private wireSocketEvents(): void {
@@ -260,11 +260,11 @@ export class NetworkedGameController {
     this.finalSprintTriggered = false;
   }
 
-  private loop(now: number): void {
+  private loop(): void {
     const serverNow = this.clock.nowServerMs();
     this.scene.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), this.ghostReplica.isLooking());
-    this.scene.updateAnimations(now);
+    this.scene.updateAnimations(serverNow);
     this.scene.render();
-    requestAnimationFrame((next) => this.loop(next));
+    requestAnimationFrame(() => this.loop());
   }
 }
