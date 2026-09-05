@@ -60,6 +60,21 @@ test("distance caps exactly at FINISH_DISTANCE_M and sets finished", () => {
   if (last?.kind === "advanced") assert.equal(last.finished, true);
 });
 
+test("a distanceMultiplier (PRD 22.2 speed boost) scales the advanced distance", () => {
+  const looking = { current: false };
+  const player = new Player(makeGhost(looking));
+  const result = player.step("left", 1.5);
+  assert.deepEqual(result, { kind: "advanced", distanceAfter: STEP_DISTANCE_M * 1.5, finished: false });
+});
+
+test("a boosted step still respects the finish-distance cap", () => {
+  const looking = { current: false };
+  const player = new Player(makeGhost(looking));
+  player.distance = FINISH_DISTANCE_M - 0.1;
+  const result = player.step("left", 5);
+  assert.deepEqual(result, { kind: "advanced", distanceAfter: FINISH_DISTANCE_M, finished: true });
+});
+
 test("reset() restores initial state", () => {
   const looking = { current: true };
   const player = new Player(makeGhost(looking));

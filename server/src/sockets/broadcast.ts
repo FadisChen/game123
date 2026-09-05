@@ -34,6 +34,13 @@ export function applyRoomEvents(io: Server, room: GameRoom, events: RoomEvent[],
           timedOut: event.timedOut,
         });
         break;
+      case "playerBoostChanged":
+        io.to(room.code).emit(SOCKET_EVENTS.roomPlayerBoostChanged, {
+          playerId: event.playerId,
+          boosted: event.boosted,
+          untilMs: event.untilMs,
+        });
+        break;
     }
   }
 }

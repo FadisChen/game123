@@ -2,7 +2,7 @@
  * 沒有真實音效素材，改用 Web Audio API 即時合成短音效（對應 PRD 第 14 章的音效清單）。
  * 「遊戲結束音」併入勝利／淘汰音效本身，避免結算當下連續播放兩段聲音。
  */
-export type SfxName = "countdown" | "go" | "footstep" | "ghostTurn" | "caught" | "eliminated" | "victory";
+export type SfxName = "countdown" | "go" | "footstep" | "ghostTurn" | "caught" | "eliminated" | "victory" | "boost";
 
 const MUTE_STORAGE_KEY = "123-doll-sfx-muted";
 
@@ -138,6 +138,10 @@ class SfxEngine {
         this.tone(ctx, t0 + 0.15, 0.16, 659, 659, "sine", 0.2);
         this.tone(ctx, t0 + 0.3, 0.16, 784, 784, "sine", 0.2);
         this.tone(ctx, t0 + 0.45, 0.4, 1047, 1047, "sine", 0.22);
+        break;
+      case "boost":
+        this.tone(ctx, t0, 0.12, 500, 1200, "sawtooth", 0.18);
+        this.tone(ctx, t0 + 0.08, 0.16, 700, 1600, "sawtooth", 0.16);
         break;
     }
   }

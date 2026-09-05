@@ -31,7 +31,11 @@ export class Player {
     this.ghost = ghost;
   }
 
-  step(foot: Foot): StepResult {
+  /**
+   * distanceMultiplier：PRD 22.2 隨機加速用，伺服器依當下該玩家是否處於加速窗口決定要傳多少
+   * （預設 1＝不加速）。乘數本身完全由呼叫端（GameRoom）決定，Player 只負責套用，不知道加速規則。
+   */
+  step(foot: Foot, distanceMultiplier = 1): StepResult {
     if (this.eliminated || this.finished) {
       return { kind: "rejected-no-alternate" };
     }
@@ -49,7 +53,7 @@ export class Player {
       return { kind: "caught", scoreAfter: this.score, eliminated: this.eliminated };
     }
 
-    this.distance = Math.min(this.distance + STEP_DISTANCE_M, FINISH_DISTANCE_M);
+    this.distance = Math.min(this.distance + STEP_DISTANCE_M * distanceMultiplier, FINISH_DISTANCE_M);
     if (this.distance >= FINISH_DISTANCE_M) {
       this.finished = true;
     }

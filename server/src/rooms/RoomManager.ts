@@ -26,7 +26,7 @@ export class RoomManager {
   createRoom(hostId: string): GameRoom {
     let code = generateRoomCode();
     while (this.rooms.has(code)) code = generateRoomCode();
-    const room = new GameRoom(code, hostId, this.rngFactory());
+    const room = new GameRoom(code, hostId, this.rngFactory(), this.rngFactory());
     this.rooms.set(code, room);
     return room;
   }

@@ -1,5 +1,6 @@
 import QRCode from "qrcode";
 import type { GhostState, PlayerSummary, RankedPlayer, RoomPhase } from "shared";
+import type { HostCameraMode } from "./HostScene";
 
 export interface HostConsolePanelCallbacks {
   onStart: () => void;
@@ -7,7 +8,15 @@ export interface HostConsolePanelCallbacks {
   onResume: () => void;
   onEnd: () => void;
   onRestart: () => void;
+  onCameraModeChange: (mode: HostCameraMode) => void;
 }
+
+const CAMERA_MODE_OPTIONS: { mode: HostCameraMode; label: string }[] = [
+  { mode: "birdseye", label: "鳥瞰" },
+  { mode: "leader", label: "領先者" },
+  { mode: "last", label: "落後者" },
+  { mode: "free", label: "自由鏡頭" },
+];
 
 const PHASE_LABEL: Record<RoomPhase, string> = {
   WAITING: "等待中",
@@ -33,6 +42,7 @@ export class HostConsolePanel {
   private readonly endButton: HTMLButtonElement;
   private readonly restartButton: HTMLButtonElement;
   private readonly toggleQrButton: HTMLButtonElement;
+  private readonly cameraModeButtons = new Map<HostCameraMode, HTMLButtonElement>();
 
   constructor(container: HTMLElement, roomCode: string, joinUrl: string, callbacks: HostConsolePanelCallbacks) {
     this.root = document.createElement("div");
@@ -83,6 +93,23 @@ export class HostConsolePanel {
     this.toggleQrButton = this.buildButton(buttonRow, "隱藏 QR", "#333333", () => this.toggleQr());
     this.buildButton(buttonRow, "顯示排名", "#8a4fd6", () => this.toggleRankingVisibility());
     this.root.appendChild(buttonRow);
+
+    const cameraTitle = document.createElement("div");
+    cameraTitle.textContent = "鏡頭模式";
+    cameraTitle.style.cssText = "font-weight:700; margin-top:4px;";
+    this.root.appendChild(cameraTitle);
+
+    const cameraRow = document.createElement("div");
+    cameraRow.style.cssText = "display:flex; flex-wrap:wrap; gap:8px;";
+    for (const { mode, label } of CAMERA_MODE_OPTIONS) {
+      const button = this.buildButton(cameraRow, label, "#333333", () => {
+        callbacks.onCameraModeChange(mode);
+        this.setActiveCameraMode(mode);
+      });
+      this.cameraModeButtons.set(mode, button);
+    }
+    this.root.appendChild(cameraRow);
+    this.setActiveCameraMode("birdseye");
 
     const listTitle = document.createElement("div");
     listTitle.textContent = "玩家";
@@ -135,6 +162,12 @@ export class HostConsolePanel {
     return button;
   }
 
+  private setActiveCameraMode(mode: HostCameraMode): void {
+    for (const [buttonMode, button] of this.cameraModeButtons) {
+      button.style.background = buttonMode === mode ? "#8a4fd6" : "#333333";
+    }
+  }
+
   setPhase(phase: RoomPhase): void {
     this.phaseEl.textContent = `遊戲狀態：${PHASE_LABEL[phase]}`;
     this.startButton.disabled = phase !== "WAITING";
@@ -161,7 +194,7 @@ export class HostConsolePanel {
         display:flex; justify-content:space-between; padding:4px 8px; border-radius:8px;
         background:#2c2c2c; opacity:${player.connected ? 1 : 0.5};
       `;
-      const status = player.finished ? "🏆" : player.eliminated ? "💀" : "";
+      const status = player.finished ? "🏆" : player.eliminated ? "💀" : player.boosted ? "⚡" : "";
       const nameSpan = document.createElement("span");
       nameSpan.textContent = `${player.name} ${status}`;
       const scoreSpan = document.createElement("span");

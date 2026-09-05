@@ -19,6 +19,12 @@ export const FAKE_TURN_DURATION_MS = GHOST_TURN_DURATION_MS * 2;
 // 最後衝刺（PRD 22.3）：距終點剩這個距離內顯示緊張提示與警示暈影
 export const FINAL_SPRINT_REMAINING_M = 10;
 
+// 隨機加速（PRD 22.2）：每位玩家每隔一段時間有機率進入短暫加速窗口
+export const SPEED_BOOST_CHECK_INTERVAL_MS = 8000;
+export const SPEED_BOOST_CHANCE = 0.3;
+export const SPEED_BOOST_DURATION_MS = 4000;
+export const SPEED_BOOST_MULTIPLIER = 1.5;
+
 // Phase 2：多人連線相關參數
 export const MAX_GAME_DURATION_MS = 4 * 60_000; // PRD 23.6 建議 3~5 分鐘
 export const RECONNECT_GRACE_MS = 30_000; // PRD 第 19 章

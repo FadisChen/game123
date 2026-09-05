@@ -15,6 +15,7 @@ import {
   type RoomCountdownTickPayload,
   type RoomGameOverPayload,
   type RoomPhaseChangedPayload,
+  type RoomPlayerBoostChangedPayload,
   type RoomPlayerConnectionChangedPayload,
   type RoomPlayerSteppedPayload,
   type RoomStateSnapshot,
@@ -106,6 +107,9 @@ export class SocketClient {
   }
   onPlayerConnectionChanged(cb: (payload: RoomPlayerConnectionChangedPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomPlayerConnectionChanged, cb);
+  }
+  onPlayerBoostChanged(cb: (payload: RoomPlayerBoostChangedPayload) => void): void {
+    this.socket.on(SOCKET_EVENTS.roomPlayerBoostChanged, cb);
   }
   onGameOver(cb: (payload: RoomGameOverPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomGameOver, cb);

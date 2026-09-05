@@ -30,6 +30,8 @@ export interface PlayerSummary {
   connected: boolean;
   /** 斷線寬限期過後仍未重連，標記為淘汰但顯示為「離線」而非「被抓」（見 PRD 19 章的預設判斷）。 */
   disconnectedPermanently?: boolean;
+  /** 目前是否處於隨機加速窗口（PRD 22.2）。 */
+  boosted?: boolean;
 }
 
 export interface GhostVisualState {
@@ -117,6 +119,12 @@ export interface RoomClosedPayload {
   reason: "host-ended" | "expired";
 }
 
+export interface RoomPlayerBoostChangedPayload {
+  playerId: PlayerId;
+  boosted: boolean;
+  untilMs?: number;
+}
+
 /** Socket.IO 事件名稱常數，前後端都從這裡引用，避免字串打錯字造成訊息對不上。 */
 export const SOCKET_EVENTS = {
   hostCreateRoom: "host:createRoom",
@@ -136,6 +144,7 @@ export const SOCKET_EVENTS = {
   ghostStateChanged: "ghost:stateChanged",
   roomPlayerStepped: "room:playerStepped",
   roomPlayerConnectionChanged: "room:playerConnectionChanged",
+  roomPlayerBoostChanged: "room:playerBoostChanged",
   roomGameOver: "room:gameOver",
   roomClosed: "room:closed",
 } as const;

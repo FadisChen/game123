@@ -5,6 +5,10 @@ import {
   MAX_PLAYERS_PER_ROOM,
   Player,
   RECONNECT_GRACE_MS,
+  SPEED_BOOST_CHANCE,
+  SPEED_BOOST_CHECK_INTERVAL_MS,
+  SPEED_BOOST_DURATION_MS,
+  SPEED_BOOST_MULTIPLIER,
   computeRanking,
   type Foot,
   type GameOverReason,
@@ -28,6 +32,9 @@ export interface ServerPlayerState {
   finishSeq?: number;
   finishedAtMs?: number;
   joinOrder: number;
+  /** 隨機加速排程（PRD 22.2）：下次檢定時間、以及目前加速視窗的到期時間（null＝未加速）。 */
+  nextBoostRollAt: number;
+  boostActiveUntil: number | null;
 }
 
 export type RoomEvent =
@@ -35,7 +42,8 @@ export type RoomEvent =
   | { type: "countdownTick"; value: number | "GO" }
   | { type: "ghostStateChanged" }
   | { type: "gameOver"; reason: GameOverReason }
-  | { type: "playerConnectionChanged"; playerId: string; connected: boolean; timedOut?: boolean };
+  | { type: "playerConnectionChanged"; playerId: string; connected: boolean; timedOut?: boolean }
+  | { type: "playerBoostChanged"; playerId: string; boosted: boolean; untilMs?: number };
 
 function toStepResultMsg(
   result: { kind: "rejected-no-alternate" } | { kind: "caught"; scoreAfter: number; eliminated: boolean } | { kind: "advanced"; distanceAfter: number; finished: boolean },
@@ -74,11 +82,14 @@ export class GameRoom {
   private nextJoinOrder = 0;
   private nextSettlementSeq = 0;
   private readonly rng: () => number;
+  private readonly boostRng: () => number;
 
-  constructor(code: string, hostId: string, rng: () => number = Math.random) {
+  /** boostRng 跟鬼的 rng 分開，兩個系統的隨機性互不干擾，也讓各自的單元測試好寫。 */
+  constructor(code: string, hostId: string, rng: () => number = Math.random, boostRng: () => number = Math.random) {
     this.code = code;
     this.hostId = hostId;
     this.rng = rng;
+    this.boostRng = boostRng;
   }
 
   /** 加入或重新加入房間。同一個 playerId 已存在時一律視為重連，不受「開始後禁止加入」限制。 */
@@ -116,6 +127,8 @@ export class GameRoom {
       disconnectedAt: null,
       disconnectedPermanently: false,
       joinOrder: this.nextJoinOrder++,
+      nextBoostRollAt: Infinity,
+      boostActiveUntil: null,
     });
     return { ok: true };
   }
@@ -162,6 +175,10 @@ export class GameRoom {
     const delta = now - this.pausedAt;
     this.ghost?.shiftClock(delta);
     if (this.roundDeadlineAt !== null) this.roundDeadlineAt += delta;
+    for (const p of this.players.values()) {
+      p.nextBoostRollAt += delta;
+      if (p.boostActiveUntil !== null) p.boostActiveUntil += delta;
+    }
     this.pausedAt = null;
     this.phase = "PLAYING";
     return { ok: true };
@@ -187,6 +204,8 @@ export class GameRoom {
       p.player.reset();
       p.finishSeq = undefined;
       p.finishedAtMs = undefined;
+      p.nextBoostRollAt = Infinity;
+      p.boostActiveUntil = null;
     }
     this.ghost = null;
     this.phase = "WAITING";
@@ -218,7 +237,8 @@ export class GameRoom {
     this.ghost.update(now);
     const ghostChanged = this.ghost.getState() !== beforeGhostState;
 
-    const result = state.player.step(foot);
+    const multiplier = this.isPlayerBoosted(state, now) ? SPEED_BOOST_MULTIPLIER : 1;
+    const result = state.player.step(foot, multiplier);
     if (result.kind === "advanced" && result.finished) {
       state.finishSeq = this.nextSettlementSeq++;
       state.finishedAtMs = now;
@@ -265,6 +285,8 @@ export class GameRoom {
       this.ghost.update(now);
       if (this.ghost.getState() !== before) events.push({ type: "ghostStateChanged" });
 
+      this.updateSpeedBoosts(now, events);
+
       const reason = this.checkForConclusion(now);
       if (reason) events.push({ type: "gameOver", reason });
     }
@@ -272,11 +294,39 @@ export class GameRoom {
     return events;
   }
 
+  /** PRD 22.2 隨機加速：每位還在場上的玩家獨立排程，到期就擲一次機率決定要不要給一段加速視窗。 */
+  private updateSpeedBoosts(now: number, events: RoomEvent[]): void {
+    for (const p of this.players.values()) {
+      if (p.player.eliminated || p.player.finished) continue;
+
+      if (p.boostActiveUntil !== null && now >= p.boostActiveUntil) {
+        p.boostActiveUntil = null;
+        events.push({ type: "playerBoostChanged", playerId: p.playerId, boosted: false });
+      }
+
+      if (now >= p.nextBoostRollAt) {
+        p.nextBoostRollAt = now + SPEED_BOOST_CHECK_INTERVAL_MS;
+        if (p.boostActiveUntil === null && this.boostRng() < SPEED_BOOST_CHANCE) {
+          p.boostActiveUntil = now + SPEED_BOOST_DURATION_MS;
+          events.push({ type: "playerBoostChanged", playerId: p.playerId, boosted: true, untilMs: p.boostActiveUntil });
+        }
+      }
+    }
+  }
+
+  private isPlayerBoosted(p: ServerPlayerState, now: number): boolean {
+    return p.boostActiveUntil !== null && now < p.boostActiveUntil;
+  }
+
   private beginPlaying(now: number): void {
     this.phase = "PLAYING";
     this.ghost = new GhostAI(now, this.rng);
     this.roundStartedAt = now;
     this.roundDeadlineAt = now + MAX_GAME_DURATION_MS;
+    for (const p of this.players.values()) {
+      p.nextBoostRollAt = now + SPEED_BOOST_CHECK_INTERVAL_MS;
+      p.boostActiveUntil = null;
+    }
   }
 
   private checkForConclusion(now: number): GameOverReason | null {
@@ -326,7 +376,7 @@ export class GameRoom {
       phase: this.phase,
       players: [...this.players.values()]
         .sort((a, b) => a.joinOrder - b.joinOrder)
-        .map((p) => this.toPlayerSummary(p)),
+        .map((p) => this.toPlayerSummary(p, now)),
       ghost: this.ghost
         ? { state: this.ghost.getState(), stateStartedAtMs: this.ghost.getStateStartedAt(), stateDurationMs: this.ghost.getStateDuration() }
         : null,
@@ -337,7 +387,7 @@ export class GameRoom {
     };
   }
 
-  private toPlayerSummary(p: ServerPlayerState): PlayerSummary {
+  private toPlayerSummary(p: ServerPlayerState, now: number): PlayerSummary {
     return {
       playerId: p.playerId,
       name: p.name,
@@ -348,6 +398,7 @@ export class GameRoom {
       finishedAtMs: p.finishedAtMs,
       connected: p.connected,
       disconnectedPermanently: p.disconnectedPermanently || undefined,
+      boosted: this.isPlayerBoosted(p, now) || undefined,
     };
   }
 

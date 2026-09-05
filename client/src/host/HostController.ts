@@ -1,4 +1,10 @@
-import { GhostReplicaAI, type PlayerSummary, type RoomPlayerSteppedPayload, type RoomStateSnapshot } from "shared";
+import {
+  GhostReplicaAI,
+  type PlayerSummary,
+  type RoomPlayerBoostChangedPayload,
+  type RoomPlayerSteppedPayload,
+  type RoomStateSnapshot,
+} from "shared";
 import { getPersistentHostId, SocketClient } from "../net/SocketClient";
 import { ClockSync } from "../net/ClockSync";
 import { HostScene } from "./HostScene";
@@ -40,6 +46,7 @@ export class HostController {
       onResume: () => void this.socketClient.resumeGame(this.actionPayload()),
       onEnd: () => void this.socketClient.endGame(this.actionPayload()),
       onRestart: () => void this.socketClient.restartGame(this.actionPayload()),
+      onCameraModeChange: (mode) => this.scene?.setCameraMode(mode),
     });
 
     this.applySnapshot(ack.snapshot);
@@ -64,6 +71,8 @@ export class HostController {
     });
 
     this.socketClient.onPlayerStepped((payload) => this.handlePlayerStepped(payload));
+
+    this.socketClient.onPlayerBoostChanged((payload) => this.handlePlayerBoostChanged(payload));
 
     this.socketClient.onGameOver((payload) => this.panel?.showRanking(payload.ranking));
   }
@@ -95,6 +104,14 @@ export class HostController {
       existing.eliminated = payload.result.eliminated;
     }
 
+    this.refreshPlayerViews();
+  }
+
+  /** room:playerBoostChanged 也沒有附帶完整快照，直接局部更新那一位玩家的加速旗標（PRD 22.2）。 */
+  private handlePlayerBoostChanged(payload: RoomPlayerBoostChangedPayload): void {
+    const existing = this.players.get(payload.playerId);
+    if (!existing) return;
+    existing.boosted = payload.boosted || undefined;
     this.refreshPlayerViews();
   }
 

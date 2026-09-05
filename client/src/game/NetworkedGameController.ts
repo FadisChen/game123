@@ -97,6 +97,11 @@ export class NetworkedGameController {
       this.handleOwnStepResult(payload.foot, payload.result);
     });
 
+    this.socketClient.onPlayerBoostChanged((payload) => {
+      if (payload.playerId !== this.playerId) return;
+      this.handleOwnBoostChanged(payload.boosted);
+    });
+
     this.socketClient.onGameOver((payload) => this.handleGameOver(payload));
   }
 
@@ -217,6 +222,13 @@ export class NetworkedGameController {
         }
         break;
     }
+  }
+
+  /** PRD 22.2：自己進入加速窗口時的提示，結束時不特別提示（玩家從動作變回正常速度即可感覺到）。 */
+  private handleOwnBoostChanged(boosted: boolean): void {
+    if (!boosted) return;
+    sfx.play("boost");
+    this.hud.showToast("⚡ 加速中！", "success");
   }
 
   private personalConclusionMessage(): string {

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { COLORS, FINISH_DISTANCE_M, MAX_PLAYERS_PER_ROOM, PLAYER_LANE_COLORS } from "shared";
 import { buildFieldEnvironment, PATH_HALF_WIDTH_M } from "../game/fieldEnvironment";
 import { GhostVisual } from "../game/ghostVisual";
@@ -6,6 +7,17 @@ import { GhostVisual } from "../game/ghostVisual";
 const GHOST_OFFSET_FROM_FINISH_M = 2;
 const AVATAR_HEIGHT_M = 0.35;
 const LANE_SPREAD_M = PATH_HALF_WIDTH_M * 1.6;
+
+const BIRDSEYE_POSITION = new THREE.Vector3(0, 18, -6);
+const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FINISH_DISTANCE_M * 0.6);
+const FOLLOW_HEIGHT_M = 9;
+const FOLLOW_BACK_OFFSET_M = 7;
+const FOLLOW_LOOKAHEAD_M = 5;
+/** 每幀往目標位置逼近的比例（0~1）：值越小鏡頭跟隨越平滑，但反應越慢。 */
+const CAMERA_FOLLOW_LERP = 0.06;
+
+/** 主辦方鏡頭模式（PRD 22.4）：鳥瞰固定機位／自動跟隨領先者／自動跟隨落後者／自由拖曳鏡頭。 */
+export type HostCameraMode = "birdseye" | "leader" | "last" | "free";
 
 export interface HostAvatarInput {
   playerId: string;
@@ -15,6 +27,7 @@ export interface HostAvatarInput {
   connected: boolean;
   eliminated: boolean;
   finished: boolean;
+  boosted?: boolean;
 }
 
 /**
@@ -33,6 +46,11 @@ export class HostScene {
   private readonly dummy = new THREE.Object3D();
   private readonly labelsContainer: HTMLDivElement;
   private readonly labelEls = new Map<string, HTMLDivElement>();
+  private readonly latestAvatars = new Map<string, { x: number; z: number; player: HostAvatarInput }>();
+  private readonly currentLookAt = BIRDSEYE_LOOK_AT.clone();
+
+  private cameraMode: HostCameraMode = "birdseye";
+  private orbitControls: OrbitControls | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -42,8 +60,8 @@ export class HostScene {
     this.scene.fog = new THREE.Fog(COLORS.skyBlue, 20, FINISH_DISTANCE_M + 30);
 
     this.camera = new THREE.PerspectiveCamera(50, this.aspect(), 0.1, 200);
-    this.camera.position.set(0, 18, -6);
-    this.camera.lookAt(0, 0, FINISH_DISTANCE_M * 0.6);
+    this.camera.position.copy(BIRDSEYE_POSITION);
+    this.camera.lookAt(this.currentLookAt);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -110,9 +128,11 @@ export class HostScene {
       const color = new THREE.Color(PLAYER_LANE_COLORS[index % PLAYER_LANE_COLORS.length]);
       if (player.eliminated) color.multiplyScalar(0.4);
       if (!player.connected) color.multiplyScalar(0.5);
+      if (player.boosted) color.lerp(new THREE.Color(0xffffff), 0.5);
       this.avatarMesh.setColorAt(index, color);
 
       this.updateLabel(player, x, z);
+      this.latestAvatars.set(player.playerId, { x, z, player });
     }
 
     this.avatarMesh.instanceMatrix.needsUpdate = true;
@@ -124,6 +144,64 @@ export class HostScene {
         this.labelEls.delete(id);
       }
     }
+    for (const id of this.latestAvatars.keys()) {
+      if (!seenIds.has(id)) this.latestAvatars.delete(id);
+    }
+  }
+
+  /** 切換鏡頭模式（PRD 22.4）；birdseye 立刻回正機位，free 才會啟用滑鼠拖曳/縮放。 */
+  setCameraMode(mode: HostCameraMode): void {
+    if (mode === this.cameraMode) return;
+    this.cameraMode = mode;
+    if (this.orbitControls) this.orbitControls.enabled = mode === "free";
+    if (mode === "free") this.ensureOrbitControls().target.copy(this.currentLookAt);
+    if (mode === "birdseye") {
+      this.camera.position.copy(BIRDSEYE_POSITION);
+      this.currentLookAt.copy(BIRDSEYE_LOOK_AT);
+      this.camera.lookAt(this.currentLookAt);
+    }
+  }
+
+  getCameraMode(): HostCameraMode {
+    return this.cameraMode;
+  }
+
+  private ensureOrbitControls(): OrbitControls {
+    if (!this.orbitControls) {
+      this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
+      this.orbitControls.enableDamping = true;
+      this.orbitControls.target.copy(this.currentLookAt);
+    }
+    return this.orbitControls;
+  }
+
+  /** 依目前鏡頭模式決定攝影機這一幀該在哪裡：leader/last 平滑跟隨，free 交給 OrbitControls，birdseye 固定不動。 */
+  private updateCameraFollow(): void {
+    if (this.cameraMode === "free") {
+      this.orbitControls?.update();
+      return;
+    }
+    if (this.cameraMode === "birdseye") return;
+
+    const target = this.pickFollowTarget();
+    if (!target) return;
+
+    const desiredPosition = new THREE.Vector3(0, FOLLOW_HEIGHT_M, target.z - FOLLOW_BACK_OFFSET_M);
+    this.camera.position.lerp(desiredPosition, CAMERA_FOLLOW_LERP);
+    this.currentLookAt.lerp(new THREE.Vector3(0, 0, target.z + FOLLOW_LOOKAHEAD_M), CAMERA_FOLLOW_LERP);
+    this.camera.lookAt(this.currentLookAt);
+  }
+
+  /** leader 選距離最遠、last 選距離最短，優先只在還在場上的玩家（未淘汰）中選，避免鏡頭黏在已出局的人身上。 */
+  private pickFollowTarget(): { x: number; z: number } | null {
+    const entries = [...this.latestAvatars.values()];
+    if (entries.length === 0) return null;
+    const active = entries.filter((entry) => !entry.player.eliminated);
+    const pool = active.length > 0 ? active : entries;
+    const sorted = [...pool].sort((a, b) =>
+      this.cameraMode === "leader" ? b.player.distance - a.player.distance : a.player.distance - b.player.distance,
+    );
+    return sorted[0] ?? null;
   }
 
   private updateLabel(player: HostAvatarInput, worldX: number, worldZ: number): void {
@@ -139,7 +217,7 @@ export class HostScene {
       this.labelEls.set(player.playerId, el);
     }
 
-    const status = player.finished ? "🏆" : player.eliminated ? "💀" : !player.connected ? "📴" : "";
+    const status = player.finished ? "🏆" : player.eliminated ? "💀" : !player.connected ? "📴" : player.boosted ? "⚡" : "";
     el.textContent = `${player.name} ${status} ${"❤️".repeat(Math.max(player.score, 0))}`;
 
     const worldPos = new THREE.Vector3(worldX, 1.1, worldZ);
@@ -152,6 +230,7 @@ export class HostScene {
   }
 
   render(): void {
+    this.updateCameraFollow();
     this.renderer.render(this.scene, this.camera);
   }
 }
