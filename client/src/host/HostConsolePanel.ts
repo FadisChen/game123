@@ -106,6 +106,7 @@ export class HostConsolePanel {
         callbacks.onCameraModeChange(mode);
         this.setActiveCameraMode(mode);
       });
+      button.dataset.cameraMode = mode;
       this.cameraModeButtons.set(mode, button);
     }
     this.root.appendChild(cameraRow);

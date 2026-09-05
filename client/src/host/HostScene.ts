@@ -208,6 +208,7 @@ export class HostScene {
     let el = this.labelEls.get(player.playerId);
     if (!el) {
       el = document.createElement("div");
+      el.dataset.playerId = player.playerId;
       el.style.cssText = `
         position:absolute; transform:translate(-50%, -100%);
         background:#333333cc; color:#f2f2f2; border-radius:8px; padding:2px 8px;
@@ -220,6 +221,10 @@ export class HostScene {
     const status = player.finished ? "🏆" : player.eliminated ? "💀" : !player.connected ? "📴" : player.boosted ? "⚡" : "";
     el.textContent = `${player.name} ${status} ${"❤️".repeat(Math.max(player.score, 0))}`;
 
+    this.positionLabel(el, worldX, worldZ);
+  }
+
+  private positionLabel(el: HTMLDivElement, worldX: number, worldZ: number): void {
     const worldPos = new THREE.Vector3(worldX, 1.1, worldZ);
     const projected = worldPos.project(this.camera);
     const screenX = (projected.x * 0.5 + 0.5) * this.container.clientWidth;
@@ -229,8 +234,21 @@ export class HostScene {
     el.style.display = projected.z > 1 ? "none" : "block";
   }
 
+  /**
+   * 攝影機每一幀都可能在動（跟隨模式的平滑逼近、自由鏡頭的拖曳），但玩家清單資料本身沒變時
+   * updateAvatars() 不會被呼叫，所以標籤位置需要獨立在每一幀重新投影，不能只靠資料變動時更新，
+   * 不然鏡頭移動時姓名/分數標籤會停在舊位置，跟畫面上的 3D 頭像對不起來。
+   */
+  private repositionLabels(): void {
+    for (const [playerId, avatar] of this.latestAvatars) {
+      const el = this.labelEls.get(playerId);
+      if (el) this.positionLabel(el, avatar.x, avatar.z);
+    }
+  }
+
   render(): void {
     this.updateCameraFollow();
+    this.repositionLabels();
     this.renderer.render(this.scene, this.camera);
   }
 }
