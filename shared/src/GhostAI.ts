@@ -142,6 +142,10 @@ export class GhostReplicaAI {
     return this.state;
   }
 
+  getRemainingMs(now: number): number {
+    return Math.max(0, this.stateDuration - (now - this.stateStartedAt));
+  }
+
   getFacingPlayerAmount(now: number): number {
     return computeFacingAmount(this.state, now - this.stateStartedAt, this.stateDuration);
   }

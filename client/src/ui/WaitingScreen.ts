@@ -8,16 +8,10 @@ export class WaitingScreen {
 
   constructor(container: HTMLElement, playerName: string) {
     this.root = document.createElement("div");
-    this.root.style.cssText = `
-      position:absolute; inset:0; background:#000000cc;
-      display:none; align-items:center; justify-content:center; z-index:10;
-    `;
+    this.root.className = "screen-overlay";
 
     const card = document.createElement("div");
-    card.style.cssText = `
-      background:#333333; color:#f2f2f2; border-radius:20px;
-      padding:32px 40px; text-align:center; max-width:min(360px, 86vw);
-    `;
+    card.className = "screen-card";
 
     const title = document.createElement("h1");
     title.textContent = "123 木頭人";

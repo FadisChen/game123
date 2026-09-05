@@ -3,6 +3,7 @@ import { JoinScreen } from "./ui/JoinScreen";
 import { getPersistentPlayerId, SocketClient } from "./net/SocketClient";
 import { NetworkedGameController } from "./game/NetworkedGameController";
 import type { JoinErrorCode } from "shared";
+import { installLandscapeGuard, requestLandscape } from "./ui/LandscapeGuard";
 
 function joinErrorMessage(error: JoinErrorCode): string {
   switch (error) {
@@ -31,6 +32,8 @@ if (!app) {
   throw new Error("#app container not found");
 }
 
+installLandscapeGuard(app);
+
 if (new URLSearchParams(location.search).has("offline")) {
   // 開發用旗標：跳過連線，直接跑 Phase 1 的本機版（純調美術/音效時不需要開伺服器）。
   void import("./game/GameController").then(({ GameController }) => {
@@ -41,6 +44,7 @@ if (new URLSearchParams(location.search).has("offline")) {
   const playerId = getPersistentPlayerId();
 
   const joinScreen = new JoinScreen(app, initialRoomCode, (roomCode, name) => {
+    void requestLandscape();
     joinScreen.setBusy(true);
     const socketClient = new SocketClient();
     void socketClient

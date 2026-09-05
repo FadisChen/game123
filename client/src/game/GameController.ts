@@ -149,6 +149,8 @@ export class GameController {
   }
 
   private loop(now: number): void {
+    this.hud.setSignal(this.ghost.getState(), this.ghost.getStateDuration() - (now - this.ghost.getStateStartedAt()), this.state === "TEACHING" ? "WAITING" : this.state);
+    this.hud.setPlayerCount(this.player.score > 0 ? 1 : 0, 1);
     if (this.state === "PLAYING") {
       this.ghost.update(now);
       const currentGhostState = this.ghost.getState();

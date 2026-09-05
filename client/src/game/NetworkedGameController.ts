@@ -3,6 +3,7 @@ import {
   FINISH_DISTANCE_M,
   GhostReplicaAI,
   type Foot,
+  type PlayerSummary,
   type RoomGameOverPayload,
   type RoomPhase,
   type RoomStateSnapshot,
@@ -34,6 +35,8 @@ export class NetworkedGameController {
   private readonly ghostReplica = new GhostReplicaAI(0);
   private readonly playerId: string;
   private readonly roomCode: string;
+  private readonly players = new Map<string, PlayerSummary>();
+  private playersDirty = false;
 
   private serverPhase: RoomPhase = "WAITING";
   private teachingDismissed = false;
@@ -93,6 +96,15 @@ export class NetworkedGameController {
     });
 
     this.socketClient.onPlayerStepped((payload) => {
+      const player = this.players.get(payload.playerId);
+      if (player && payload.result.kind === "advanced") {
+        player.distance = payload.result.distanceAfter;
+        player.finished = payload.result.finished;
+      } else if (player && payload.result.kind === "caught") {
+        player.score = payload.result.scoreAfter;
+        player.eliminated = payload.result.eliminated;
+      }
+      this.refreshPlayers();
       if (payload.playerId !== this.playerId) return;
       this.handleOwnStepResult(payload.foot, payload.result);
     });
@@ -108,6 +120,9 @@ export class NetworkedGameController {
   private applySnapshot(snapshot: RoomStateSnapshot): void {
     this.clock.updateFromServerNow(snapshot.serverNowMs);
     this.serverPhase = snapshot.phase;
+    this.players.clear();
+    for (const player of snapshot.players) this.players.set(player.playerId, player);
+    this.refreshPlayers();
     if (snapshot.ghost) {
       this.ghostReplica.applyServerState(snapshot.ghost.state, snapshot.ghost.stateStartedAtMs, snapshot.ghost.stateDurationMs);
     }
@@ -138,6 +153,8 @@ export class NetworkedGameController {
         break;
       case "COUNTDOWN":
         this.myOutcome = "active"; // 新回合開始，個人結果重置
+        this.finalSprintTriggered = false;
+        this.hud.resetFinalSprint();
         this.teaching.setVisible(false);
         this.waiting.setVisible(false);
         this.gameOver.hide();
@@ -186,7 +203,7 @@ export class NetworkedGameController {
   }
 
   private handleStepPress(foot: Foot): void {
-    if (this.serverPhase !== "PLAYING") return;
+    if (this.serverPhase !== "PLAYING" || this.myOutcome !== "active") return;
     void this.socketClient.step({
       roomCode: this.roomCode,
       playerId: this.playerId,
@@ -261,10 +278,21 @@ export class NetworkedGameController {
   }
 
   private loop(): void {
+    if (this.playersDirty) {
+      this.playersDirty = false;
+      const players = [...this.players.values()];
+      this.scene.updatePlayers(players, this.playerId);
+      this.hud.setPlayers(players);
+    }
     const serverNow = this.clock.nowServerMs();
+    this.hud.setSignal(this.ghostReplica.getState(), this.ghostReplica.getRemainingMs(serverNow), this.serverPhase);
     this.scene.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), this.ghostReplica.isLooking());
     this.scene.updateAnimations(serverNow);
     this.scene.render();
     requestAnimationFrame(() => this.loop());
+  }
+
+  private refreshPlayers(): void {
+    this.playersDirty = true;
   }
 }

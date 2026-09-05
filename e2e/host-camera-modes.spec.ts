@@ -12,7 +12,6 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
  * 之前就搶先讀到殘留的舊座標；用輪詢等到條件成立才做斷言可以兩者兼顧。
  */
 
-const ACTIVE_BG = "rgb(138, 79, 214)"; // #8a4fd6，HostConsolePanel.setActiveCameraMode 用的高亮色
 const CAMERA_MODES = ["birdseye", "leader", "last", "free"] as const;
 
 async function readRoomCode(hostPage: Page): Promise<string> {
@@ -61,12 +60,7 @@ async function labelPosition(hostPage: Page, playerId: string): Promise<{ x: num
 
 async function assertOnlyActive(hostPage: Page, activeMode: (typeof CAMERA_MODES)[number]): Promise<void> {
   for (const mode of CAMERA_MODES) {
-    const bg = await hostPage.locator(`[data-camera-mode="${mode}"]`).evaluate((el) => getComputedStyle(el).backgroundColor);
-    if (mode === activeMode) {
-      expect(bg, `${mode} 應該是高亮色`).toBe(ACTIVE_BG);
-    } else {
-      expect(bg, `${mode} 不應該是高亮色`).not.toBe(ACTIVE_BG);
-    }
+    await expect(hostPage.locator(`[data-camera-mode="${mode}"]`)).toHaveAttribute("aria-pressed", String(mode === activeMode));
   }
 }
 
@@ -168,6 +162,39 @@ test("host camera modes switch correctly and keep the 3D scene alive", async ({ 
   await assertOnlyActive(hostPage, "birdseye");
   await pollLabelDistanceFrom(hostPage, p0Id, birdseyeP0, (d) => d < 5);
   await pollLabelDistanceFrom(hostPage, p1Id, birdseyeP1, (d) => d < 5);
+
+  // 四個方向鍵會切到自由鏡頭並持續平移；放開、切離視窗會停止。
+  for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+    const beforeKey = await labelPosition(hostPage, p0Id);
+    if (!beforeKey) throw new Error("按方向鍵前應該看得到玩家");
+    await hostPage.keyboard.down(key);
+    await assertOnlyActive(hostPage, "free");
+    await pollLabelDistanceFrom(hostPage, p0Id, beforeKey, (d) => d > 5);
+    await hostPage.keyboard.up(key);
+    const stopped = await labelPosition(hostPage, p0Id);
+    await hostPage.waitForTimeout(180);
+    const afterRelease = await labelPosition(hostPage, p0Id);
+    expect(distance(stopped!, afterRelease!)).toBeLessThan(1);
+    await hostPage.locator('[data-camera-mode="birdseye"]').click();
+    await pollLabelDistanceFrom(hostPage, p0Id, birdseyeP0, (d) => d < 5);
+  }
+
+  await hostPage.keyboard.down("ArrowUp");
+  await pollLabelDistanceFrom(hostPage, p0Id, birdseyeP0, (d) => d > 5);
+  await hostPage.evaluate(() => window.dispatchEvent(new Event("blur")));
+  const blurred = await labelPosition(hostPage, p0Id);
+  await hostPage.waitForTimeout(180);
+  expect(distance(blurred!, (await labelPosition(hostPage, p0Id))!)).toBeLessThan(1);
+  await hostPage.keyboard.up("ArrowUp");
+
+  await hostPage.locator('[data-camera-mode="birdseye"]').click();
+  const directionButton = hostPage.getByRole("button", { name: "鏡頭向右" });
+  const buttonBox = await directionButton.boundingBox();
+  await hostPage.mouse.move(buttonBox!.x + buttonBox!.width / 2, buttonBox!.y + buttonBox!.height / 2);
+  await hostPage.mouse.down();
+  await pollLabelDistanceFrom(hostPage, p0Id, birdseyeP0, (d) => d > 5);
+  await hostPage.mouse.up();
+  await assertOnlyActive(hostPage, "free");
 
   await expect(hostPage.locator("canvas")).toBeVisible();
   expect(pageErrors, `切換鏡頭模式過程中不應該有任何 JS 例外：${pageErrors.join("; ")}`).toHaveLength(0);

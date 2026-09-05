@@ -14,16 +14,10 @@ export class GameOverScreen {
 
   constructor(container: HTMLElement, onRestart: () => void, buttonLabel = "再玩一次") {
     this.root = document.createElement("div");
-    this.root.style.cssText = `
-      position:absolute; inset:0; background:#000000cc;
-      display:none; align-items:center; justify-content:center; z-index:10;
-    `;
+    this.root.className = "screen-overlay";
 
     const card = document.createElement("div");
-    card.style.cssText = `
-      background:#333333; color:#f2f2f2; border-radius:20px;
-      padding:32px 40px; text-align:center; max-width:min(420px, 86vw);
-    `;
+    card.className = "screen-card";
 
     this.titleEl = document.createElement("h1");
     this.titleEl.style.cssText = "margin:0 0 8px; font-size:30px;";
@@ -35,10 +29,7 @@ export class GameOverScreen {
 
     const button = document.createElement("button");
     button.textContent = buttonLabel;
-    button.style.cssText = `
-      pointer-events:auto; border:none; border-radius:14px; background:#118a65; color:#fff;
-      font-size:20px; font-weight:700; padding:12px 32px; cursor:pointer;
-    `;
+    button.className = "primary-button";
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       onRestart();

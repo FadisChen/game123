@@ -22,6 +22,7 @@ export class HostController {
   private scene: HostScene | null = null;
   private panel: HostConsolePanel | null = null;
   private roomCode = "";
+  private playersDirty = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -37,7 +38,10 @@ export class HostController {
       return;
     }
     this.roomCode = ack.roomCode;
-    this.scene = new HostScene(this.container);
+    const viewport = document.createElement("div");
+    viewport.className = "host-viewport";
+    this.container.appendChild(viewport);
+    this.scene = new HostScene(viewport);
 
     const joinUrl = `${location.origin}/join/${ack.roomCode}`;
     this.panel = new HostConsolePanel(this.container, ack.roomCode, joinUrl, {
@@ -47,7 +51,9 @@ export class HostController {
       onEnd: () => void this.socketClient.endGame(this.actionPayload()),
       onRestart: () => void this.socketClient.restartGame(this.actionPayload()),
       onCameraModeChange: (mode) => this.scene?.setCameraMode(mode),
+      onCameraDirection: (direction, pressed) => this.scene?.setDirectionPressed(direction, pressed),
     });
+    this.scene.onCameraModeChange = (mode) => this.panel?.setActiveCameraMode(mode);
 
     this.applySnapshot(ack.snapshot);
   }
@@ -116,18 +122,24 @@ export class HostController {
   }
 
   private refreshPlayerViews(): void {
-    const list = [...this.players.values()];
-    this.panel?.setPlayers(list);
-    this.scene?.updateAvatars(list);
+    this.playersDirty = true;
   }
 
   private loop(): void {
     if (this.scene) {
+      // 多人同時踏步時，每幀合併更新一次，避免每個封包都重建整份角色與名單。
+      if (this.playersDirty) {
+        this.playersDirty = false;
+        const players = [...this.players.values()];
+        this.panel?.setPlayers(players);
+        this.scene.updateAvatars(players);
+      }
       const serverNow = this.clock.nowServerMs();
       const isLooking = this.ghostReplica.isLooking();
       this.scene.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), isLooking);
-      this.panel?.setGhostState(this.ghostReplica.getState(), isLooking);
+      this.panel?.setGhostState(this.ghostReplica.getState(), this.ghostReplica.getRemainingMs(serverNow));
       this.scene.render();
+      this.panel?.setCameraView(this.scene.camera.position, this.scene.getCameraTarget());
     }
     requestAnimationFrame(() => this.loop());
   }

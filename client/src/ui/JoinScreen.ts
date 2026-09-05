@@ -8,17 +8,10 @@ export class JoinScreen {
 
   constructor(container: HTMLElement, initialRoomCode: string, onSubmit: (roomCode: string, name: string) => void) {
     this.root = document.createElement("div");
-    this.root.style.cssText = `
-      position:absolute; inset:0; background:#000000cc;
-      display:flex; align-items:center; justify-content:center; z-index:20;
-      font-family:inherit;
-    `;
+    this.root.className = "screen-overlay join-overlay";
 
     const card = document.createElement("div");
-    card.style.cssText = `
-      background:#333333; color:#f2f2f2; border-radius:20px;
-      padding:28px 32px; width:min(320px, 86vw); text-align:center;
-    `;
+    card.className = "screen-card join-card";
 
     const title = document.createElement("h1");
     title.textContent = "123 木頭人";
@@ -36,10 +29,7 @@ export class JoinScreen {
 
     this.button = document.createElement("button");
     this.button.textContent = "加入遊戲";
-    this.button.style.cssText = `
-      pointer-events:auto; border:none; border-radius:14px; background:#e8447a; color:#fff;
-      font-size:20px; font-weight:700; padding:12px 32px; cursor:pointer; width:100%;
-    `;
+    this.button.className = "primary-button";
     this.button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const roomCode = this.roomInput.value.trim().toUpperCase();
@@ -66,11 +56,7 @@ export class JoinScreen {
     input.type = "text";
     input.placeholder = placeholder;
     input.value = initialValue;
-    input.style.cssText = `
-      pointer-events:auto; width:100%; box-sizing:border-box; margin-bottom:12px;
-      padding:12px 14px; border-radius:12px; border:none; font-size:18px;
-      background:#f2f2f2; color:#333333; text-align:center;
-    `;
+    input.setAttribute("aria-label", placeholder);
     card.appendChild(input);
     return input;
   }

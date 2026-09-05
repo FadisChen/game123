@@ -1,61 +1,69 @@
 import { FOOT_BUTTON_LOCKOUT_MS, type Foot } from "shared";
+import { isLandscape } from "./LandscapeGuard";
 
-const BUTTON_BASE_STYLE = `
-  pointer-events:auto; position:absolute; bottom:24px;
-  width:96px; height:96px; border-radius:50%; border:none;
-  background:#118a65cc; color:#fff; font-size:14px; font-weight:700;
-  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
-  touch-action:none; -webkit-user-select:none; user-select:none;
-`;
-
-function buildFootButton(side: "left" | "right"): HTMLButtonElement {
+function buildFootButton(side: Foot): HTMLButtonElement {
   const button = document.createElement("button");
-  button.style.cssText = `${BUTTON_BASE_STYLE} ${side}:24px;`;
-  button.innerHTML = `<span style="font-size:28px;">🦶</span><span>${side === "left" ? "左腳" : "右腳"}</span>`;
+  button.className = `foot-button foot-button--${side}`;
+  button.type = "button";
+  button.innerHTML = `<span class="foot-arrow" aria-hidden="true">${side === "left" ? "←" : "→"}</span>
+    <span>${side === "left" ? "左腳" : "右腳"}</span><kbd>${side === "left" ? "←" : "→"}</kbd>`;
   return button;
 }
 
-/** 左右腳按鈕：Pointer Events 統一處理滑鼠/觸控，並鎖定短暫時間避免單次點擊被誤判成連點。 */
+/** 觸控、滑鼠與方向鍵共用輸入節流；長按鍵盤不會自動連踩。 */
 export class Controls {
   private readonly root: HTMLDivElement;
   private readonly leftButton: HTMLButtonElement;
   private readonly rightButton: HTMLButtonElement;
-  private locked = false;
+  private lockedUntil = 0;
+  private visible = true;
 
   constructor(container: HTMLElement, onStep: (foot: Foot) => void) {
     this.root = document.createElement("div");
-    this.root.style.cssText = "position:absolute; inset:0; pointer-events:none;";
-
+    this.root.className = "player-controls";
     this.leftButton = buildFootButton("left");
     this.rightButton = buildFootButton("right");
-    this.root.appendChild(this.leftButton);
-    this.root.appendChild(this.rightButton);
+    const hint = document.createElement("div");
+    hint.className = "step-hint";
+    hint.textContent = "左右交替前進 · 紅燈停下";
+    this.root.append(this.leftButton, hint, this.rightButton);
     container.appendChild(this.root);
 
-    const handlePress = (foot: Foot) => (event: PointerEvent) => {
-      event.preventDefault();
-      if (this.locked) return;
-      this.locked = true;
-      window.setTimeout(() => {
-        this.locked = false;
-      }, FOOT_BUTTON_LOCKOUT_MS);
+    const press = (foot: Foot) => {
+      if (!this.visible || !isLandscape() || performance.now() < this.lockedUntil) return;
+      this.lockedUntil = performance.now() + FOOT_BUTTON_LOCKOUT_MS;
+      const button = foot === "left" ? this.leftButton : this.rightButton;
+      button.classList.add("is-pressed");
+      window.setTimeout(() => button.classList.remove("is-pressed"), FOOT_BUTTON_LOCKOUT_MS);
       onStep(foot);
     };
-
-    this.leftButton.addEventListener("pointerdown", handlePress("left"));
-    this.rightButton.addEventListener("pointerdown", handlePress("right"));
+    for (const [foot, button] of [["left", this.leftButton], ["right", this.rightButton]] as const) {
+      button.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        press(foot);
+      });
+      button.addEventListener("click", (event) => {
+        if (event.detail === 0) press(foot);
+      });
+    }
+    window.addEventListener("keydown", (event) => {
+      if (!this.visible || !isLandscape() || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]")) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      if (!event.repeat) press(event.key === "ArrowLeft" ? "left" : "right");
+    });
   }
 
-  /** 拒絕輸入（未交替）時的輕微視覺回饋。 */
   flashRejected(foot: Foot): void {
     const button = foot === "left" ? this.leftButton : this.rightButton;
-    button.style.background = "#666666cc";
-    window.setTimeout(() => {
-      button.style.background = "#118a65cc";
-    }, 150);
+    button.classList.add("is-rejected");
+    window.setTimeout(() => button.classList.remove("is-rejected"), 150);
   }
 
   setVisible(visible: boolean): void {
-    this.root.style.display = visible ? "block" : "none";
+    this.visible = visible;
+    this.root.hidden = !visible;
   }
 }

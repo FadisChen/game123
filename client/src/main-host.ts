@@ -6,4 +6,5 @@ if (!app) {
   throw new Error("#app container not found");
 }
 
+document.body.classList.add("host-page");
 new HostController(app);

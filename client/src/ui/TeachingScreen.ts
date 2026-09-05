@@ -1,4 +1,6 @@
-const RULES = ["鬼回頭時不能移動", "被發現會扣 1 分", "扣到 0 分即淘汰", "抵達終點線獲勝"];
+import { requestLandscape } from "./LandscapeGuard";
+
+const RULES = ["交替點擊左、右腳，或按鍵盤 ← → 前進", "綠燈前進，鬼回頭時立刻停下", "被發現扣 1 分，扣到 0 分即淘汰", "抵達粉紅色終點線即獲勝"];
 
 /** 教學畫面（對應 PRD 10 章 TEACHING 狀態與美術參考圖的四格教學卡）。 */
 export class TeachingScreen {
@@ -6,16 +8,10 @@ export class TeachingScreen {
 
   constructor(container: HTMLElement, onConfirm: () => void) {
     this.root = document.createElement("div");
-    this.root.style.cssText = `
-      position:absolute; inset:0; background:#000000cc;
-      display:flex; align-items:center; justify-content:center; z-index:10;
-    `;
+    this.root.className = "screen-overlay";
 
     const card = document.createElement("div");
-    card.style.cssText = `
-      background:#333333; color:#f2f2f2; border-radius:20px;
-      padding:28px 32px; max-width:min(420px, 86vw); text-align:center;
-    `;
+    card.className = "screen-card";
 
     const title = document.createElement("h1");
     title.textContent = "遊戲教學";
@@ -33,12 +29,10 @@ export class TeachingScreen {
 
     const button = document.createElement("button");
     button.textContent = "我知道了";
-    button.style.cssText = `
-      pointer-events:auto; border:none; border-radius:14px; background:#f94144; color:#fff;
-      font-size:20px; font-weight:700; padding:12px 32px; cursor:pointer;
-    `;
+    button.className = "primary-button";
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
+      void requestLandscape();
       onConfirm();
     });
     card.appendChild(button);
