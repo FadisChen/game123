@@ -16,7 +16,11 @@ function oppositeFoot(foot: Foot): Foot {
 }
 
 function isSecureMotionContext(): boolean {
-  return window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  return (
+    window.isSecureContext ||
+    location.hostname === "localhost" ||
+    location.hostname === "127.0.0.1"
+  );
 }
 
 /**
@@ -35,19 +39,28 @@ export class MotionInput {
   private sensorTimeoutId: number | undefined;
   private receivedSensorSample = false;
   private gameplayActive = false;
+  private wakeLockSentinel: WakeLockSentinel | null = null;
 
-  constructor(onStep: (foot: Foot) => void, onAvailabilityChange?: (available: boolean) => void) {
+  constructor(
+    onStep: (foot: Foot) => void,
+    onAvailabilityChange?: (available: boolean) => void,
+  ) {
     this.onStep = onStep;
     this.onAvailabilityChange = onAvailabilityChange;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") this.syncWakeLock();
+    });
   }
 
   async requestPermission(): Promise<boolean> {
-    if (!isSecureMotionContext() || !("DeviceMotionEvent" in window)) return false;
+    if (!isSecureMotionContext() || !("DeviceMotionEvent" in window))
+      return false;
 
-    const motionEvent = window.DeviceMotionEvent as DeviceMotionEventWithPermission;
+    const motionEvent =
+      window.DeviceMotionEvent as DeviceMotionEventWithPermission;
     if (typeof motionEvent.requestPermission === "function") {
       try {
-        if (await motionEvent.requestPermission() !== "granted") return false;
+        if ((await motionEvent.requestPermission()) !== "granted") return false;
       } catch {
         return false;
       }
@@ -63,11 +76,17 @@ export class MotionInput {
     this.sensorTimeoutId = undefined;
     if (active && this.listening) {
       this.sensorTimeoutId = window.setTimeout(() => {
-        if (this.receivedSensorSample || !this.listening || !this.gameplayActive) return;
+        if (
+          this.receivedSensorSample ||
+          !this.listening ||
+          !this.gameplayActive
+        )
+          return;
         this.stop();
         this.onAvailabilityChange?.(false);
       }, MOTION_SENSOR_TIMEOUT_MS);
     }
+    this.syncWakeLock();
   }
 
   start(): void {
@@ -86,6 +105,7 @@ export class MotionInput {
     window.clearTimeout(this.sensorTimeoutId);
     this.sensorTimeoutId = undefined;
     this.resetSignal();
+    this.releaseWakeLock();
   }
 
   resetSequence(): void {
@@ -115,10 +135,18 @@ export class MotionInput {
 
     const now = performance.now();
     if (!this.armed) {
-      if (Math.abs(delta) <= MOTION_RELEASE_MPS2 && now - this.lastTriggerAt >= MOTION_MIN_INTERVAL_MS) this.armed = true;
+      if (
+        Math.abs(delta) <= MOTION_RELEASE_MPS2 &&
+        now - this.lastTriggerAt >= MOTION_MIN_INTERVAL_MS
+      )
+        this.armed = true;
       return;
     }
-    if (Math.abs(delta) < MOTION_TRIGGER_MPS2 || now - this.lastTriggerAt < MOTION_MIN_INTERVAL_MS) return;
+    if (
+      Math.abs(delta) < MOTION_TRIGGER_MPS2 ||
+      now - this.lastTriggerAt < MOTION_MIN_INTERVAL_MS
+    )
+      return;
 
     this.armed = false;
     this.lastTriggerAt = now;
@@ -129,16 +157,55 @@ export class MotionInput {
 
   private readVerticalAcceleration(event: DeviceMotionEvent): number | null {
     const acceleration = event.acceleration;
-    const source = acceleration?.x !== null && acceleration?.x !== undefined && acceleration?.y !== null && acceleration?.y !== undefined
-      ? acceleration
-      : event.accelerationIncludingGravity;
-    if (source?.x === null || source?.y === null || source?.x === undefined || source?.y === undefined) return null;
+    const source =
+      acceleration?.x !== null &&
+      acceleration?.x !== undefined &&
+      acceleration?.y !== null &&
+      acceleration?.y !== undefined
+        ? acceleration
+        : event.accelerationIncludingGravity;
+    if (
+      source?.x === null ||
+      source?.y === null ||
+      source?.x === undefined ||
+      source?.y === undefined
+    )
+      return null;
 
     const angle = ((screen.orientation?.angle ?? 0) + 360) % 360;
     if (angle === 90) return source.x;
     if (angle === 270) return -source.x;
     if (angle === 180) return -source.y;
     return source.y;
+  }
+
+  private syncWakeLock(): void {
+    if (this.gameplayActive && this.listening) void this.requestWakeLock();
+    else this.releaseWakeLock();
+  }
+
+  private async requestWakeLock(): Promise<void> {
+    if (
+      this.wakeLockSentinel ||
+      document.visibilityState !== "visible" ||
+      !isSecureMotionContext() ||
+      !("wakeLock" in navigator)
+    )
+      return;
+
+    try {
+      this.wakeLockSentinel = await navigator.wakeLock.request("screen");
+      this.wakeLockSentinel.addEventListener("release", () => {
+        this.wakeLockSentinel = null;
+      });
+    } catch {
+      this.wakeLockSentinel = null;
+    }
+  }
+
+  private releaseWakeLock(): void {
+    void this.wakeLockSentinel?.release();
+    this.wakeLockSentinel = null;
   }
 
   private resetSignal(): void {

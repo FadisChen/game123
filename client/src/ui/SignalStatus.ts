@@ -20,6 +20,6 @@ export class GameStatus {
   update(state: GhostState, phase: RoomPhase): void {
     const status = phase === "PAUSED" ? "paused" : phase === "WAITING" ? "waiting" : phase === "GAME_OVER" ? "over" : state === "LOOK_AWAY" ? "moving" : state === "LOOKING" ? "looking" : "turning";
     this.root.dataset.status = status;
-    this.label.textContent = phase === "PAUSED" ? "已暫停" : phase === "WAITING" ? "等待開始" : phase === "GAME_OVER" ? "本局結束" : state === "LOOK_AWAY" ? "音樂播放中・可以前進" : state === "LOOKING" ? "鬼正在審視・停止移動" : "鬼轉身中";
+    this.label.textContent = phase === "PAUSED" ? "已暫停" : phase === "WAITING" ? "等待開始" : phase === "GAME_OVER" ? "本局結束" : "";
   }
 }
