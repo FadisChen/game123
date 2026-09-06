@@ -34,7 +34,10 @@ const CAMERA_MODE_OPTIONS: { mode: HostCameraMode; label: string }[] = [
   { mode: "free", label: "自由鏡頭" },
 ];
 const PHASE_LABEL: Record<RoomPhase, string> = {
-  WAITING: "等待玩家加入", PLAYING: "遊戲進行中", PAUSED: "遊戲已暫停", GAME_OVER: "本局已結束",
+  WAITING: "等待玩家加入",
+  PLAYING: "遊戲進行中",
+  PAUSED: "遊戲已暫停",
+  GAME_OVER: "本局已結束",
 };
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -47,9 +50,14 @@ export class HostConsolePanel {
   private readonly playerListEl = document.createElement("div");
   private readonly rankingOverlay = document.createElement("div");
   private readonly rankingListEl = document.createElement("div");
+  private readonly countdownOverlay = document.createElement("div");
+  private readonly countdownDigit = document.createElement("div");
   private readonly roomDetails = document.createElement("details");
   private readonly settingsSection: HTMLElement;
-  private readonly cameraModeButtons = new Map<HostCameraMode, HTMLButtonElement>();
+  private readonly cameraModeButtons = new Map<
+    HostCameraMode,
+    HTMLButtonElement
+  >();
   private readonly actionButtons = new Map<string, HTMLButtonElement>();
   private readonly scoreButtons = new Map<number, HTMLButtonElement>();
   private readonly playerModeButtons = new Map<PlayerMode, HTMLButtonElement>();
@@ -60,11 +68,18 @@ export class HostConsolePanel {
   private readonly cameraCone = document.createElementNS(SVG_NS, "path");
   private readonly cameraDot = document.createElementNS(SVG_NS, "circle");
   private phase: RoomPhase = "WAITING";
+  /** 開場運鏡＋倒數期間鎖住「開始遊戲」鈕，避免快照更新（例如有玩家加入）把它重新打開造成連點。 */
+  private starting = false;
   /** setPlayers() 每次都重建整份名單，所以「剛出局／剛抵達」的高亮要記在這裡才能撐過重建。 */
   private readonly flashing = new Map<string, "eliminated" | "finished">();
   private lastPlayers: PlayerSummary[] = [];
 
-  constructor(container: HTMLElement, roomCode: string, joinUrl: string, callbacks: HostConsolePanelCallbacks) {
+  constructor(
+    container: HTMLElement,
+    roomCode: string,
+    joinUrl: string,
+    callbacks: HostConsolePanelCallbacks,
+  ) {
     this.root.className = "host-panel";
     this.root.setAttribute("aria-label", "主辦方控制台");
     const brand = document.createElement("div");
@@ -88,8 +103,10 @@ export class HostConsolePanel {
     const actions = document.createElement("div");
     actions.className = "host-actions";
     for (const [key, label, action] of [
-      ["start", "開始遊戲", callbacks.onStart], ["pause", "暫停遊戲", callbacks.onPause],
-      ["resume", "繼續遊戲", callbacks.onResume], ["end", "結束遊戲", callbacks.onEnd],
+      ["start", "開始遊戲", callbacks.onStart],
+      ["pause", "暫停遊戲", callbacks.onPause],
+      ["resume", "繼續遊戲", callbacks.onResume],
+      ["end", "結束遊戲", callbacks.onEnd],
       ["restart", "重新開始", callbacks.onRestart],
     ] as const) {
       const button = this.buildButton(actions, label, action);
@@ -101,13 +118,26 @@ export class HostConsolePanel {
     // 只在 WAITING 階段開放（見 setPhase）：開打後才換數值會讓已經扣過血的玩家跟判定基準不一致。
     const settings = this.section("遊戲設定");
     this.settingsSection = settings;
-    settings.append(this.settingRow("每人血量", SCORE_OPTIONS, this.scoreButtons, (value) => String(value), (maxScore) =>
-      callbacks.onSettingsChange({ ...this.settings, maxScore }),
-    ));
-    settings.append(this.settingRow("玩家玩法", PLAYER_MODE_OPTIONS, this.playerModeButtons,
-      (mode) => mode === "main" ? "主視角" : "感應式",
-      (playerMode) => callbacks.onSettingsChange({ ...this.settings, playerMode }),
-    ));
+    settings.append(
+      this.settingRow(
+        "每人血量",
+        SCORE_OPTIONS,
+        this.scoreButtons,
+        (value) => String(value),
+        (maxScore) =>
+          callbacks.onSettingsChange({ ...this.settings, maxScore }),
+      ),
+    );
+    settings.append(
+      this.settingRow(
+        "玩家玩法",
+        PLAYER_MODE_OPTIONS,
+        this.playerModeButtons,
+        (mode) => (mode === "main" ? "主視角" : "感應式"),
+        (playerMode) =>
+          callbacks.onSettingsChange({ ...this.settings, playerMode }),
+      ),
+    );
     const distanceLabel = document.createElement("label");
     distanceLabel.className = "setting-row distance-setting";
     distanceLabel.innerHTML = "<span>遊戲距離（m）</span>";
@@ -117,11 +147,17 @@ export class HostConsolePanel {
     this.distanceInput.inputMode = "decimal";
     this.distanceInput.required = true;
     this.distanceInput.addEventListener("change", () => {
-      if (!this.distanceInput.reportValidity() || !Number.isFinite(this.distanceInput.valueAsNumber)) {
+      if (
+        !this.distanceInput.reportValidity() ||
+        !Number.isFinite(this.distanceInput.valueAsNumber)
+      ) {
         this.distanceInput.value = this.settings.finishDistanceM.toFixed(1);
         return;
       }
-      callbacks.onSettingsChange({ ...this.settings, finishDistanceM: this.distanceInput.valueAsNumber });
+      callbacks.onSettingsChange({
+        ...this.settings,
+        finishDistanceM: this.distanceInput.valueAsNumber,
+      });
     });
     distanceLabel.appendChild(this.distanceInput);
     settings.appendChild(distanceLabel);
@@ -130,7 +166,9 @@ export class HostConsolePanel {
     const modes = document.createElement("div");
     modes.className = "camera-modes";
     for (const { mode, label } of CAMERA_MODE_OPTIONS) {
-      const button = this.buildButton(modes, label, () => callbacks.onCameraModeChange(mode));
+      const button = this.buildButton(modes, label, () =>
+        callbacks.onCameraModeChange(mode),
+      );
       button.dataset.cameraMode = mode;
       this.cameraModeButtons.set(mode, button);
     }
@@ -152,8 +190,10 @@ export class HostConsolePanel {
     const dpad = document.createElement("div");
     dpad.className = "camera-dpad";
     for (const [direction, arrow, label] of [
-      ["ArrowUp", "↑", "鏡頭向前"], ["ArrowLeft", "←", "鏡頭向左"],
-      ["ArrowDown", "↓", "鏡頭向後"], ["ArrowRight", "→", "鏡頭向右"],
+      ["ArrowUp", "↑", "鏡頭向前"],
+      ["ArrowLeft", "←", "鏡頭向左"],
+      ["ArrowDown", "↓", "鏡頭向後"],
+      ["ArrowRight", "→", "鏡頭向右"],
     ]) {
       const button = this.buildButton(dpad, arrow, () => {});
       button.dataset.direction = direction;
@@ -187,7 +227,9 @@ export class HostConsolePanel {
     const qr = document.createElement("img");
     qr.className = "room-qr";
     qr.alt = `掃描加入房間 ${roomCode}`;
-    void QRCode.toDataURL(joinUrl, { width: 256, margin: 2 }).then((url) => { qr.src = url; });
+    void QRCode.toDataURL(joinUrl, { width: 256, margin: 2 }).then((url) => {
+      qr.src = url;
+    });
     const link = document.createElement("a");
     link.href = joinUrl;
     link.target = "_blank";
@@ -202,7 +244,9 @@ export class HostConsolePanel {
     playersTitle.textContent = "玩家名單與排名";
     this.playerListEl.className = "host-player-list";
     players.append(playersTitle, this.playerListEl);
-    this.buildButton(players, "顯示排名", () => { this.rankingOverlay.hidden = false; });
+    this.buildButton(players, "顯示排名", () => {
+      this.rankingOverlay.hidden = false;
+    });
     this.root.appendChild(players);
 
     this.rankingOverlay.className = "screen-overlay ranking-overlay";
@@ -216,12 +260,22 @@ export class HostConsolePanel {
     this.rankingListEl.className = "ranking-list";
     this.rankingListEl.textContent = "遊戲結束後，將在這裡顯示排名。";
     rankingCard.append(rankingTitle, this.rankingListEl);
-    this.buildButton(rankingCard, "關閉排名", () => { this.rankingOverlay.hidden = true; });
+    this.buildButton(rankingCard, "關閉排名", () => {
+      this.rankingOverlay.hidden = true;
+    });
     this.rankingOverlay.appendChild(rankingCard);
     this.rankingOverlay.addEventListener("pointerdown", (event) => {
-      if (event.target === this.rankingOverlay) this.rankingOverlay.hidden = true;
+      if (event.target === this.rankingOverlay)
+        this.rankingOverlay.hidden = true;
     });
-    container.append(this.root, this.rankingOverlay);
+    this.countdownOverlay.className = "countdown-overlay";
+    this.countdownOverlay.setAttribute("role", "status");
+    this.countdownOverlay.setAttribute("aria-live", "assertive");
+    this.countdownOverlay.hidden = true;
+    this.countdownDigit.className = "countdown-digit";
+    this.countdownOverlay.appendChild(this.countdownDigit);
+
+    container.append(this.root, this.rankingOverlay, this.countdownOverlay);
     this.setActiveCameraMode("birdseye");
     this.setSettings(this.settings);
     this.setPhase("WAITING");
@@ -252,13 +306,20 @@ export class HostConsolePanel {
     const buttons = document.createElement("div");
     buttons.className = "camera-modes setting-options";
     for (const value of values) {
-      registry.set(value, this.buildButton(buttons, labelOf(value), () => onPick(value)));
+      registry.set(
+        value,
+        this.buildButton(buttons, labelOf(value), () => onPick(value)),
+      );
     }
     row.append(heading, buttons);
     return row;
   }
 
-  private buildButton(row: HTMLElement, label: string, onClick: () => void): HTMLButtonElement {
+  private buildButton(
+    row: HTMLElement,
+    label: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = label;
@@ -268,30 +329,80 @@ export class HostConsolePanel {
   }
 
   setActiveCameraMode(mode: HostCameraMode): void {
-    for (const [buttonMode, button] of this.cameraModeButtons) button.setAttribute("aria-pressed", String(buttonMode === mode));
+    for (const [buttonMode, button] of this.cameraModeButtons)
+      button.setAttribute("aria-pressed", String(buttonMode === mode));
   }
 
   setSettings(settings: RoomSettings): void {
     this.settings = settings;
     this.distanceInput.value = settings.finishDistanceM.toFixed(1);
     this.distanceEl.textContent = `全程 ${settings.finishDistanceM.toFixed(1)} m`;
-    for (const [value, button] of this.scoreButtons) button.setAttribute("aria-pressed", String(value === settings.maxScore));
-    for (const [mode, button] of this.playerModeButtons) button.setAttribute("aria-pressed", String(mode === settings.playerMode));
+    for (const [value, button] of this.scoreButtons)
+      button.setAttribute("aria-pressed", String(value === settings.maxScore));
+    for (const [mode, button] of this.playerModeButtons)
+      button.setAttribute("aria-pressed", String(mode === settings.playerMode));
+  }
+
+  /** 開場運鏡＋倒數期間呼叫 setStarting(true) 鎖住「開始遊戲」鈕；期間收到的快照更新（setPhase）不能把它重新打開。 */
+  setStarting(starting: boolean): void {
+    this.starting = starting;
+    this.updateActionButtons();
+  }
+
+  private updateActionButtons(): void {
+    const phase = this.phase;
+    for (const [key, button] of this.actionButtons) {
+      const enabled =
+        key === "start"
+          ? phase === "WAITING" && !this.starting
+          : key === "pause"
+            ? phase === "PLAYING"
+            : key === "resume"
+              ? phase === "PAUSED"
+              : key === "restart"
+                ? phase === "GAME_OVER"
+                : phase !== "WAITING" && phase !== "GAME_OVER";
+      button.disabled = !enabled;
+      button.hidden = !enabled;
+    }
+  }
+
+  /** 全螢幕紅色數字倒數（3→2→1，各顯示 1 秒），倒數完呼叫 onDone——由呼叫端接著真正送出 startGame。 */
+  playCountdown(onDone: () => void): void {
+    this.countdownOverlay.hidden = false;
+    let remaining = 3;
+    const showDigit = () => {
+      this.countdownDigit.textContent = String(remaining);
+      this.countdownDigit.classList.remove("countdown-digit-pulse");
+      void this.countdownDigit.offsetWidth;
+      this.countdownDigit.classList.add("countdown-digit-pulse");
+    };
+    showDigit();
+    const tick = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        this.countdownOverlay.hidden = true;
+        onDone();
+        return;
+      }
+      showDigit();
+      window.setTimeout(tick, 1000);
+    };
+    window.setTimeout(tick, 1000);
   }
 
   setPhase(phase: RoomPhase): void {
     if (phase !== this.phase) this.roomDetails.open = phase === "WAITING";
     this.phase = phase;
     this.phaseEl.textContent = PHASE_LABEL[phase];
-    for (const [key, button] of this.actionButtons) {
-      const enabled = key === "start" ? phase === "WAITING" : key === "pause" ? phase === "PLAYING" : key === "resume" ? phase === "PAUSED" : key === "restart" ? phase === "GAME_OVER" : phase !== "WAITING" && phase !== "GAME_OVER";
-      button.disabled = !enabled;
-      button.hidden = !enabled;
-    }
+    this.updateActionButtons();
     // 開打後設定就鎖住了，整塊收起來把版面讓給鏡頭控制與玩家名單。
     this.settingsSection.hidden = phase !== "WAITING";
     this.distanceInput.disabled = phase !== "WAITING";
-    for (const button of [...this.scoreButtons.values(), ...this.playerModeButtons.values()]) {
+    for (const button of [
+      ...this.scoreButtons.values(),
+      ...this.playerModeButtons.values(),
+    ]) {
       button.disabled = phase !== "WAITING";
     }
     if (phase === "WAITING") this.rankingOverlay.hidden = true;
@@ -317,22 +428,47 @@ export class HostConsolePanel {
     this.countEl.innerHTML = `<span>存活玩家</span><div><strong>${alive}</strong><span> / ${players.length}</span></div>`;
     this.playerListEl.replaceChildren();
     this.mapPlayers.replaceChildren();
-    if (!players.length) this.playerListEl.textContent = "分享房號，邀請第一位玩家加入。";
+    if (!players.length)
+      this.playerListEl.textContent = "分享房號，邀請第一位玩家加入。";
     players.forEach((player, index) => {
       const row = document.createElement("div");
       row.className = "host-player-row";
       row.dataset.playerId = player.playerId;
       const flash = this.flashing.get(player.playerId);
-      if (flash) row.classList.add(flash === "finished" ? "row-flash-win" : "row-flash-out");
+      if (flash)
+        row.classList.add(
+          flash === "finished" ? "row-flash-win" : "row-flash-out",
+        );
       const name = document.createElement("span");
       name.textContent = `${String(index + 1).padStart(3, "0")}  ${player.name}`;
       const status = document.createElement("span");
-      status.textContent = player.finished ? "已抵達" : player.eliminated ? "已淘汰" : !player.connected ? "離線" : `${player.score} ♥`;
+      status.textContent = player.finished
+        ? "已抵達"
+        : player.eliminated
+          ? "已淘汰"
+          : !player.connected
+            ? "離線"
+            : `${player.score} ♥`;
       row.append(name, status);
       this.playerListEl.appendChild(row);
       const dot = document.createElementNS(SVG_NS, "circle");
-      dot.setAttribute("cx", String(120 - playerLaneX(index, players.length) * 4));
-      dot.setAttribute("cy", String(113 - playerWorldZ(index, player.distance, this.settings.finishDistanceM) / FIELD_LENGTH * 85));
+      dot.setAttribute(
+        "cx",
+        String(120 - playerLaneX(index, players.length) * 4),
+      );
+      dot.setAttribute(
+        "cy",
+        String(
+          113 -
+            (playerWorldZ(
+              index,
+              player.distance,
+              this.settings.finishDistanceM,
+            ) /
+              FIELD_LENGTH) *
+              85,
+        ),
+      );
       dot.setAttribute("r", "2.3");
       dot.setAttribute("fill", player.eliminated ? "#e7908c" : "#8eecb0");
       this.mapPlayers.appendChild(dot);
@@ -349,15 +485,24 @@ export class HostConsolePanel {
     }, 2000);
   }
 
-  setCameraView(position: { x: number; z: number }, target: { x: number; z: number }): void {
+  setCameraView(
+    position: { x: number; z: number },
+    target: { x: number; z: number },
+  ): void {
     const x = Math.max(8, Math.min(232, 120 - position.x * 4));
-    const y = Math.max(8, Math.min(138, 113 - position.z / FIELD_LENGTH * 85));
+    const y = Math.max(
+      8,
+      Math.min(138, 113 - (position.z / FIELD_LENGTH) * 85),
+    );
     const dx = -(target.x - position.x);
     const dy = -(target.z - position.z);
     const length = Math.hypot(dx, dy) || 1;
     const fx = dx / length;
     const fy = dy / length;
-    this.cameraCone.setAttribute("d", `M${x},${y} L${x + fx * 70 - fy * 30},${y + fy * 70 + fx * 30} L${x + fx * 70 + fy * 30},${y + fy * 70 - fx * 30} Z`);
+    this.cameraCone.setAttribute(
+      "d",
+      `M${x},${y} L${x + fx * 70 - fy * 30},${y + fy * 70 + fx * 30} L${x + fx * 70 + fy * 30},${y + fy * 70 - fx * 30} Z`,
+    );
     this.cameraDot.setAttribute("cx", String(x));
     this.cameraDot.setAttribute("cy", String(y));
   }

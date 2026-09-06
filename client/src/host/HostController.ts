@@ -18,16 +18,23 @@ export class HostController {
   private readonly socketClient = new SocketClient();
   private readonly clock = new ClockSync();
   private readonly ghostReplica = new GhostReplicaAI(0);
-  private readonly music = new MusicPlayer(() => this.panel?.showMusicPlaybackError());
+  private readonly music = new MusicPlayer(() =>
+    this.panel?.showMusicPlaybackError(),
+  );
   private readonly hostId = getPersistentHostId();
   private readonly players = new Map<string, PlayerSummary>();
   /** 上一幀每位玩家的勝負狀態，用來偵測「剛出局／剛抵達」的那一瞬間好放特效。 */
-  private readonly lastOutcome = new Map<string, "active" | "eliminated" | "finished">();
+  private readonly lastOutcome = new Map<
+    string,
+    "active" | "eliminated" | "finished"
+  >();
 
   private scene: HostScene | null = null;
   private panel: HostConsolePanel | null = null;
   private roomCode = "";
   private playersDirty = false;
+  /** 避免開場運鏡＋倒數播放期間被連點「開始遊戲」重複觸發。 */
+  private startSequenceActive = false;
   private currentPhase: RoomStateSnapshot["phase"] = "WAITING";
   private currentGhost: GhostVisualState | null = null;
 
@@ -53,9 +60,19 @@ export class HostController {
     const joinUrl = `${location.origin}/join/${ack.roomCode}`;
     this.panel = new HostConsolePanel(this.container, ack.roomCode, joinUrl, {
       onStart: () => {
+        if (this.startSequenceActive) return;
+        this.startSequenceActive = true;
         sfx.unlock();
         this.music.primeFromGesture();
-        void this.socketClient.startGame(this.actionPayload());
+        this.panel?.setStarting(true);
+        // 主辦方鏡頭先推進、環繞玩家一圈、回到鳥瞰機位，再全螢幕倒數 3 秒，最後才真正呼叫 startGame。
+        this.scene?.playStartCinematic(() => {
+          this.panel?.playCountdown(() => {
+            this.startSequenceActive = false;
+            this.panel?.setStarting(false);
+            void this.socketClient.startGame(this.actionPayload());
+          });
+        });
       },
       onPause: () => void this.socketClient.pauseGame(this.actionPayload()),
       onResume: () => {
@@ -70,10 +87,16 @@ export class HostController {
         this.music.retry();
       },
       onCameraModeChange: (mode) => this.scene?.setCameraMode(mode),
-      onCameraDirection: (direction, pressed) => this.scene?.setDirectionPressed(direction, pressed),
-      onSettingsChange: (settings) => void this.socketClient.updateSettings({ ...this.actionPayload(), settings }),
+      onCameraDirection: (direction, pressed) =>
+        this.scene?.setDirectionPressed(direction, pressed),
+      onSettingsChange: (settings) =>
+        void this.socketClient.updateSettings({
+          ...this.actionPayload(),
+          settings,
+        }),
     });
-    this.scene.onCameraModeChange = (mode) => this.panel?.setActiveCameraMode(mode);
+    this.scene.onCameraModeChange = (mode) =>
+      this.panel?.setActiveCameraMode(mode);
 
     this.applySnapshot(ack.snapshot);
   }
@@ -96,13 +119,23 @@ export class HostController {
 
     this.socketClient.onGhostStateChanged((payload) => {
       this.currentGhost = payload;
-      this.ghostReplica.applyServerState(payload.state, payload.stateStartedAtMs, payload.stateDurationMs, payload.musicCycle, payload.musicPlaybackRate);
+      this.ghostReplica.applyServerState(
+        payload.state,
+        payload.stateStartedAtMs,
+        payload.stateDurationMs,
+        payload.musicCycle,
+        payload.musicPlaybackRate,
+      );
       this.syncMusic(this.clock.nowServerMs());
     });
 
-    this.socketClient.onPlayerStepped((payload) => this.handlePlayerStepped(payload));
+    this.socketClient.onPlayerStepped((payload) =>
+      this.handlePlayerStepped(payload),
+    );
 
-    this.socketClient.onPlayerBoostChanged((payload) => this.handlePlayerBoostChanged(payload));
+    this.socketClient.onPlayerBoostChanged((payload) =>
+      this.handlePlayerBoostChanged(payload),
+    );
 
     this.socketClient.onGameOver((payload) => {
       this.currentPhase = "GAME_OVER";
@@ -117,11 +150,18 @@ export class HostController {
     this.currentPhase = snapshot.phase;
     this.currentGhost = snapshot.ghost;
     if (snapshot.ghost) {
-      this.ghostReplica.applyServerState(snapshot.ghost.state, snapshot.ghost.stateStartedAtMs, snapshot.ghost.stateDurationMs, snapshot.ghost.musicCycle, snapshot.ghost.musicPlaybackRate);
+      this.ghostReplica.applyServerState(
+        snapshot.ghost.state,
+        snapshot.ghost.stateStartedAtMs,
+        snapshot.ghost.stateDurationMs,
+        snapshot.ghost.musicCycle,
+        snapshot.ghost.musicPlaybackRate,
+      );
     }
 
     this.players.clear();
-    for (const player of snapshot.players) this.players.set(player.playerId, player);
+    for (const player of snapshot.players)
+      this.players.set(player.playerId, player);
 
     this.panel?.setSettings(snapshot.settings);
     this.scene?.setFinishDistance(snapshot.settings.finishDistanceM);
@@ -143,7 +183,8 @@ export class HostController {
     if (payload.result.kind === "advanced") {
       existing.distance = payload.result.distanceAfter;
       existing.finished = payload.result.finished;
-      if (payload.result.finished) existing.finishedAtMs = payload.result.finishedAtMs;
+      if (payload.result.finished)
+        existing.finishedAtMs = payload.result.finishedAtMs;
     } else if (payload.result.kind === "caught") {
       existing.score = payload.result.scoreAfter;
       existing.eliminated = payload.result.eliminated;
@@ -153,7 +194,9 @@ export class HostController {
   }
 
   /** room:playerBoostChanged 也沒有附帶完整快照，直接局部更新那一位玩家的加速旗標（PRD 22.2）。 */
-  private handlePlayerBoostChanged(payload: RoomPlayerBoostChangedPayload): void {
+  private handlePlayerBoostChanged(
+    payload: RoomPlayerBoostChangedPayload,
+  ): void {
     const existing = this.players.get(payload.playerId);
     if (!existing) return;
     existing.boosted = payload.boosted || undefined;
@@ -168,11 +211,20 @@ export class HostController {
     const seen = new Set<string>();
     for (const player of players) {
       seen.add(player.playerId);
-      const outcome = player.finished ? "finished" : player.eliminated ? "eliminated" : "active";
+      const outcome = player.finished
+        ? "finished"
+        : player.eliminated
+          ? "eliminated"
+          : "active";
       const previous = this.lastOutcome.get(player.playerId);
       this.lastOutcome.set(player.playerId, outcome);
       // 第一次見到這位玩家時只記錄狀態不放特效，否則主辦方重新整理頁面會被補放一整批。
-      if (previous === undefined || previous === outcome || outcome === "active") continue;
+      if (
+        previous === undefined ||
+        previous === outcome ||
+        outcome === "active"
+      )
+        continue;
       this.scene?.playOutcomeEffect(player.playerId, outcome);
       this.panel?.flashPlayer(player.playerId, outcome);
     }
@@ -199,10 +251,16 @@ export class HostController {
       const serverNow = this.clock.nowServerMs();
       this.syncMusic(serverNow);
       const isLooking = this.ghostReplica.isLooking();
-      this.scene.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), isLooking);
+      this.scene.updateGhostVisual(
+        this.ghostReplica.getFacingPlayerAmount(serverNow),
+        isLooking,
+      );
       this.panel?.setGhostState(this.ghostReplica.getState());
       this.scene.render();
-      this.panel?.setCameraView(this.scene.camera.position, this.scene.getCameraTarget());
+      this.panel?.setCameraView(
+        this.scene.camera.position,
+        this.scene.getCameraTarget(),
+      );
     }
     requestAnimationFrame(() => this.loop());
   }
