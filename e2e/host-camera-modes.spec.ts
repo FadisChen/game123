@@ -188,13 +188,8 @@ test("host camera modes switch correctly and keep the 3D scene alive", async ({ 
   await hostPage.keyboard.up("ArrowUp");
 
   await hostPage.locator('[data-camera-mode="birdseye"]').click();
-  const directionButton = hostPage.getByRole("button", { name: "鏡頭向右" });
-  const buttonBox = await directionButton.boundingBox();
-  await hostPage.mouse.move(buttonBox!.x + buttonBox!.width / 2, buttonBox!.y + buttonBox!.height / 2);
-  await hostPage.mouse.down();
-  await pollLabelDistanceFrom(hostPage, p0Id, birdseyeP0, (d) => d > 5);
-  await hostPage.mouse.up();
-  await assertOnlyActive(hostPage, "free");
+  // 主辦方保留鍵盤與拖曳操作，介面不再顯示方向按鈕。
+  await expect(hostPage.getByRole("button", { name: "鏡頭向右" })).toHaveCount(0);
 
   await expect(hostPage.locator("canvas")).toBeVisible();
   expect(pageErrors, `切換鏡頭模式過程中不應該有任何 JS 例外：${pageErrors.join("; ")}`).toHaveLength(0);

@@ -110,3 +110,19 @@ test("configure() applies new room settings and resets the player to the new max
   looking.current = false;
   assert.deepEqual(player.step("left"), { kind: "advanced", distanceAfter: 0.25, finished: false });
 });
+
+test("custom distance governs finishing and boosted steps cap at the configured line", () => {
+  const player = new Player({ isLooking: () => false }, 3, STEP_DISTANCE_M, 72.4);
+  player.distance = 50;
+  assert.deepEqual(player.step("left"), { kind: "advanced", distanceAfter: 50.32, finished: false });
+  player.distance = 72.3;
+  assert.deepEqual(player.step("right", 1.5), { kind: "advanced", distanceAfter: 72.4, finished: true });
+  player.configure(2, STEP_DISTANCE_M, 0.5);
+  assert.equal(player.finished, false);
+  player.step("left");
+  assert.deepEqual(player.step("right"), { kind: "advanced", distanceAfter: 0.5, finished: true });
+  player.reset();
+  player.step("left");
+  assert.equal(player.step("right").kind, "advanced");
+  assert.equal(player.distance, 0.5);
+});

@@ -26,7 +26,9 @@ import { MotionInput } from "../input/MotionInput";
  * 再依伺服器廣播的結果驅動跟 Phase 1 完全相同的 Scene/HUD/音效程式碼。
  */
 export class NetworkedGameController {
-  private readonly scene: GameScene;
+  private scene: GameScene | null = null;
+  private readonly container: HTMLElement;
+  private readonly motionPrompt = document.createElement("p");
   private readonly hud: HUD;
   private readonly teaching: TeachingScreen;
   private readonly waiting: WaitingScreen;
@@ -44,6 +46,7 @@ export class NetworkedGameController {
   private serverPhase: RoomPhase = "WAITING";
   private teachingDismissed = false;
   private playerMode: PlayerMode = "main";
+  private finishDistanceM = FINISH_DISTANCE_M;
   private finalSprintTriggered = false;
   private nextClientSeq = 0;
   /** 個人結果可能早於整個房間的回合結束（其他玩家還在玩），跟房間階段分開追蹤。 */
@@ -65,8 +68,13 @@ export class NetworkedGameController {
     this.roomCode = roomCode;
     this.playerId = playerId;
 
-    this.scene = new GameScene(container);
-    this.hud = new HUD(container);
+    this.container = container;
+    container.classList.add("player-game");
+    this.motionPrompt.className = "motion-prompt";
+    this.motionPrompt.setAttribute("role", "status");
+    this.motionPrompt.hidden = true;
+    container.appendChild(this.motionPrompt);
+    this.hud = new HUD(container, `${playerName} · 房間 ${roomCode}`);
     this.controls = new Controls(container, (foot) => this.handleStepPress(foot));
     this.motionInput = new MotionInput(
       (foot) => this.handleMotionStep(foot),
@@ -137,7 +145,8 @@ export class NetworkedGameController {
     const mine = snapshot.players.find((p) => p.playerId === this.playerId);
     if (mine) {
       this.hud.setScore(mine.score, snapshot.settings.maxScore);
-      this.scene.setCameraDistanceImmediate(mine.distance);
+      this.scene?.setCameraDistanceImmediate(mine.distance);
+      this.hud.setProgress(mine.distance, this.finishDistanceM);
       // 重連時可能已經在上一次連線期間被淘汰/抵達終點，用快照補回這個狀態。
       this.myOutcome = mine.finished ? "finished" : mine.eliminated ? "eliminated" : "active";
     }
@@ -145,7 +154,17 @@ export class NetworkedGameController {
   }
 
   private applyRoomSettings(settings: RoomStateSnapshot["settings"]): void {
+    this.finishDistanceM = settings.finishDistanceM;
+    if (this.playerMode !== settings.playerMode && this.serverPhase === "WAITING") {
+      this.teachingDismissed = false;
+    }
     this.playerMode = settings.playerMode;
+    this.container.classList.toggle("motion-mode", this.playerMode === "motion");
+    if (this.playerMode === "main") {
+      this.scene ??= new GameScene(this.container);
+      this.scene.setFinishDistance(settings.finishDistanceM);
+    }
+    if (this.scene) this.scene.renderer.domElement.hidden = this.playerMode === "motion";
     this.controls.setMode(settings.playerMode);
     this.teaching.setPlayerMode(settings.playerMode);
     if (settings.playerMode === "main") {
@@ -156,6 +175,10 @@ export class NetworkedGameController {
 
   /** 重連後光靠事件流可能錯過中間狀態，所以每次拿到完整快照都重新對齊一次畫面。 */
   private syncScreensToPhase(): void {
+    this.motionPrompt.hidden = this.playerMode !== "motion" || this.myOutcome !== "active" || !["PLAYING", "PAUSED"].includes(this.serverPhase);
+    this.motionPrompt.textContent = this.serverPhase === "PAUSED"
+      ? "遊戲暫停\n請保持靜止，等待主辦方繼續"
+      : "感應模式\n請看主辦方畫面，依現場音樂移動";
     if (this.playerMode === "motion") {
       this.motionInput.setGameplayActive(this.serverPhase === "PLAYING");
     }
@@ -165,13 +188,14 @@ export class NetworkedGameController {
         this.finalSprintTriggered = false;
         this.hud.resetFinalSprint();
         this.hud.clearOutcomeOverlay();
-        this.scene.resetCollapse();
+        this.scene?.resetCollapse();
         this.motionInput.resetSequence();
         this.hud.setVisible(false);
         this.controls.setVisible(false);
         this.gameOver.hide();
         if (this.teachingDismissed) {
           this.teaching.setVisible(false);
+          this.waiting.setMessage();
           this.waiting.setVisible(true);
         } else {
           this.waiting.setVisible(false);
@@ -182,7 +206,7 @@ export class NetworkedGameController {
         this.teaching.setVisible(false);
         this.waiting.setVisible(false);
         this.gameOver.hide();
-        this.hud.setVisible(true);
+        this.hud.setVisible(this.playerMode === "main");
         if (this.myOutcome === "active") {
           this.waiting.setVisible(false);
           this.controls.setVisible(true);
@@ -196,7 +220,7 @@ export class NetworkedGameController {
         this.teaching.setVisible(false);
         this.waiting.setVisible(false);
         this.gameOver.hide();
-        this.hud.setVisible(true);
+        this.hud.setVisible(this.playerMode === "main");
         if (this.myOutcome === "active") {
           this.waiting.setVisible(false);
           this.controls.setVisible(false);
@@ -215,6 +239,7 @@ export class NetworkedGameController {
   }
 
   private async handleTeachingDismissed(): Promise<void> {
+    sfx.unlock();
     this.teachingDismissed = true;
     if (this.playerMode === "motion") {
       const available = await this.motionInput.requestPermission();
@@ -228,6 +253,7 @@ export class NetworkedGameController {
 
   private handleStepPress(foot: Foot): void {
     if (this.serverPhase !== "PLAYING" || this.myOutcome !== "active") return;
+    sfx.unlock();
     void this.socketClient.step({
       roomCode: this.roomCode,
       playerId: this.playerId,
@@ -250,18 +276,19 @@ export class NetworkedGameController {
       case "caught":
         this.hud.setScore(result.scoreAfter);
         this.hud.showToast("被發現! -1分", "warn");
-        this.scene.startCaughtShake(now);
-        sfx.play(result.eliminated ? "eliminated" : "caught");
+        this.scene?.startCaughtShake(now);
+        sfx.play("caught");
         if (result.eliminated) {
           this.myOutcome = "eliminated";
           this.hud.showOutcomeOverlay("eliminated");
-          this.scene.playCollapse(now);
+          this.scene?.playCollapse(now);
           this.syncScreensToPhase();
         }
         break;
       case "advanced":
         sfx.play("footstep");
-        this.scene.startStepTween(result.distanceAfter, foot, now);
+        this.scene?.startStepTween(result.distanceAfter, foot, now);
+        this.hud.setProgress(result.distanceAfter, this.finishDistanceM);
         this.maybeTriggerFinalSprint(result.distanceAfter);
         if (result.finished) {
           sfx.play("victory");
@@ -289,7 +316,7 @@ export class NetworkedGameController {
   /** 距終點剩 FINAL_SPRINT_REMAINING_M 內時觸發一次緊張提示（對應 PRD 22.3），跟 Phase 1 版本邏輯相同。 */
   private maybeTriggerFinalSprint(distance: number): void {
     if (this.finalSprintTriggered) return;
-    const remaining = FINISH_DISTANCE_M - distance;
+    const remaining = this.finishDistanceM - distance;
     if (remaining <= 0 || remaining > FINAL_SPRINT_REMAINING_M) return;
     this.finalSprintTriggered = true;
     this.hud.showFinalSprintBanner(`最後 ${Math.ceil(remaining)} 公尺！`);
@@ -297,6 +324,8 @@ export class NetworkedGameController {
 
   private handleGameOver(payload: RoomGameOverPayload): void {
     this.serverPhase = "GAME_OVER";
+    this.motionPrompt.hidden = true;
+    this.motionInput.setGameplayActive(false);
     this.controls.setVisible(false);
     this.waiting.setVisible(false);
     const mine = payload.ranking.find((r) => r.playerId === this.playerId);
@@ -314,13 +343,15 @@ export class NetworkedGameController {
     if (this.playersDirty) {
       this.playersDirty = false;
       const players = [...this.players.values()];
-      this.scene.updatePlayers(players, this.playerId);
+      this.scene?.updatePlayers(players, this.playerId);
       this.hud.setPlayers(players);
     }
-    const serverNow = this.clock.nowServerMs();
-    this.scene.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), this.ghostReplica.isLooking());
-    this.scene.updateAnimations(serverNow);
-    this.scene.render();
+    if (this.playerMode === "main") {
+      const serverNow = this.clock.nowServerMs();
+      this.scene?.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), this.ghostReplica.isLooking());
+      this.scene?.updateAnimations(serverNow);
+      this.scene?.render();
+    }
     requestAnimationFrame(() => this.loop());
   }
 

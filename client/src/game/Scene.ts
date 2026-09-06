@@ -1,18 +1,14 @@
 import * as THREE from "three";
 import { FINISH_DISTANCE_M, STEP_TWEEN_MS, type Foot, type PlayerSummary } from "shared";
-import { buildFieldEnvironment, lightScene } from "./fieldEnvironment";
+import { buildFieldEnvironment, FIELD_LENGTH, lightScene } from "./fieldEnvironment";
 import { GhostVisual } from "./ghostVisual";
-import { PlayerAvatars, playerLaneX, playerWorldZ } from "./PlayerAvatars";
-import { part, sphere } from "./characterModels";
+import { COLLAPSE_DURATION_MS, COLLAPSE_ROLL_RAD, PlayerAvatars, playerLaneX, playerWorldZ } from "./PlayerAvatars";
 
 const CAMERA_HEIGHT_M = 1.3;
 const GHOST_OFFSET_BEYOND_FINISH_M = 1;
 const BOB_HEIGHT_M = 0.06;
 const SHAKE_DURATION_MS = 220;
 const SHAKE_MAGNITUDE_M = 0.05;
-/** 自己被淘汰時的倒地鏡頭：跟其他玩家身上的倒地動畫同長度，看起來才是同一件事。 */
-const COLLAPSE_DURATION_MS = 700;
-const COLLAPSE_ROLL_RAD = 1.35;
 const COLLAPSE_EYE_HEIGHT_M = 0.3;
 
 function easeOutCubic(t: number): number {
@@ -27,7 +23,7 @@ export class GameScene {
   private readonly ghostVisual: GhostVisual;
   private readonly container: HTMLElement;
   private readonly avatars: PlayerAvatars;
-  private readonly hands = new THREE.Group();
+  private finishDistanceM = FINISH_DISTANCE_M;
   private laneX = 0;
   private playerIndex = 0;
 
@@ -47,12 +43,13 @@ export class GameScene {
    */
   private readonly baseQuaternion = new THREE.Quaternion();
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, showNames = true) {
     this.container = container;
+    container.classList.add("player-game");
 
     this.scene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(55, this.aspect(), 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(48, this.aspect(), 0.1, 200);
     this.camera.position.set(0, CAMERA_HEIGHT_M, 0);
     this.camera.lookAt(0, CAMERA_HEIGHT_M, 1);
     this.baseQuaternion.copy(this.camera.quaternion);
@@ -67,11 +64,10 @@ export class GameScene {
 
     buildFieldEnvironment(this.scene);
 
-    const ghostZ = FINISH_DISTANCE_M + GHOST_OFFSET_BEYOND_FINISH_M;
+    const ghostZ = FIELD_LENGTH + GHOST_OFFSET_BEYOND_FINISH_M;
     this.ghostVisual = new GhostVisual(this.scene, new THREE.Vector3(0, 0, ghostZ));
 
-    this.avatars = new PlayerAvatars(this.scene, { showNames: true });
-    this.buildHands();
+    this.avatars = new PlayerAvatars(this.scene, { showNames });
     new ResizeObserver(() => this.handleResize()).observe(container);
   }
 
@@ -117,7 +113,7 @@ export class GameScene {
   setCameraDistanceImmediate(distance: number): void {
     this.cameraDistance = distance;
     this.tweenActive = false;
-    this.camera.position.z = playerWorldZ(this.playerIndex, distance);
+    this.camera.position.z = playerWorldZ(this.playerIndex, distance, this.finishDistanceM);
   }
 
   /** 每幀呼叫：推進攝影機補間、踏步擺動、震動效果，以及其他玩家的出局倒地動畫。 */
@@ -147,18 +143,20 @@ export class GameScene {
       collapse = easeOutCubic(Math.min(Math.max(now - this.collapseStartedAt, 0) / COLLAPSE_DURATION_MS, 1));
     }
 
-    this.camera.position.z = playerWorldZ(this.playerIndex, this.cameraDistance);
-    this.camera.position.y = CAMERA_HEIGHT_M + bobOffset - (CAMERA_HEIGHT_M - COLLAPSE_EYE_HEIGHT_M) * collapse;
-    this.camera.position.x = this.laneX + lateralOffset + shakeOffset;
+    this.camera.position.z = playerWorldZ(this.playerIndex, this.cameraDistance, this.finishDistanceM);
+    const fallAngle = COLLAPSE_ROLL_RAD * collapse;
+    const eyeRadius = CAMERA_HEIGHT_M - COLLAPSE_EYE_HEIGHT_M;
+    this.camera.position.y = COLLAPSE_EYE_HEIGHT_M + eyeRadius * Math.cos(fallAngle) + bobOffset * (1 - collapse);
+    this.camera.position.x = this.laneX + (lateralOffset + shakeOffset) * (1 - collapse) - eyeRadius * Math.sin(fallAngle);
     if (collapse > 0) {
       this.camera.quaternion.copy(this.baseQuaternion);
-      this.camera.rotateZ(COLLAPSE_ROLL_RAD * collapse); // local space 的側傾，等同於「頭歪向一邊」
+      // 相機看向 +Z，local Z 與角色的 world Z 相反，必須反號才會倒向同一側。
+      this.camera.rotateZ(-fallAngle);
     }
-    this.hands.position.y = -0.13 + bobOffset * 0.3;
   }
 
   updatePlayers(players: PlayerSummary[], ownId: string): void {
-    this.avatars.update(players, ownId);
+    this.avatars.update(players, ownId, this.finishDistanceM);
     const index = players.findIndex((player) => player.playerId === ownId);
     if (index >= 0) {
       this.playerIndex = index;
@@ -166,21 +164,8 @@ export class GameScene {
     }
   }
 
-  private buildHands(): void {
-    this.hands.scale.setScalar(0.72);
-    this.hands.position.set(0, -0.13, -0.1);
-    for (const side of [-1, 1]) {
-      const sleeve = part(this.hands, new THREE.CapsuleGeometry(0.09, 0.3, 6, 12), 0x176659, side * 0.32, -0.37, -0.5);
-      sleeve.rotation.set(-0.75, 0, side * 0.6);
-      sphere(this.hands, 0xe6b78b, side * 0.25, -0.23, -0.64, 0.09, 0.06, 0.115);
-      for (let finger = 0; finger < 4; finger++) {
-        sphere(this.hands, 0xe6b78b, side * 0.25 + (finger - 1.5) * 0.039, -0.208, -0.72, 0.024, 0.028, 0.065 - Math.abs(finger - 1.5) * 0.009);
-      }
-      sphere(this.hands, 0xe6b78b, side * 0.17, -0.245, -0.64, 0.045, 0.034, 0.065);
-    }
-    this.hands.traverse((object) => { if (object instanceof THREE.Mesh) object.castShadow = false; });
-    this.camera.add(this.hands);
-    this.scene.add(this.camera);
+  setFinishDistance(distance: number): void {
+    this.finishDistanceM = distance;
   }
 
   render(): void {

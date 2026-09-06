@@ -1,0 +1,109 @@
+/* 正式玩家與離線模式共用已確認的遊戲介面。 */
+.player-game {
+  --game-ink: #182e36;
+  --game-mint: #a0edc3;
+  --game-ivory: #fff5de;
+  --game-glass: linear-gradient(145deg, #203842e8, #172a30d9);
+  color: var(--game-ivory);
+}
+.player-game::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px #fff4d338, inset 0 -70px 90px -60px #182e3680;
+  pointer-events: none;
+}
+.player-game .player-identity {
+  position: absolute;
+  top: 25px;
+  left: 28px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  text-shadow: 0 2px 12px #182e3699;
+  pointer-events: none;
+}
+.player-game .player-symbol { color: var(--game-ivory); font-size: 26px; letter-spacing: .15em; }
+.player-game .player-identity strong { display: block; font-size: 19px; letter-spacing: .14em; font-weight: 800; }
+.player-game .player-identity div > span { display: block; margin-top: 7px; font-size: 10px; letter-spacing: .18em; color: #f7f0dddc; }
+.player-game .player-health { top: 94px; left: 30px; padding: 8px 13px; border: 1px solid #fff5de40; border-radius: 30px; background: #20384299; font-size: 16px; letter-spacing: 5px; backdrop-filter: blur(8px); }
+.player-game .player-survivors { top: 24px; right: 25px; min-width: 150px; padding: 15px 24px; border: 1px solid #ffffff40; border-radius: 15px; background: var(--game-glass); box-shadow: 0 6px 24px #172a3026, inset 0 1px #ffffff12; backdrop-filter: blur(12px); }
+.player-game .player-survivors > span { color: #f0f0dfcc; font-size: 12px; letter-spacing: .18em; }
+.player-game .player-survivors > div { margin-top: 6px; font-size: 26px; }
+.player-game .player-survivors strong { color: var(--game-mint); font-size: 37px; }
+.player-game .preview-sample-note { position: absolute; top: 128px; right: 36px; color: #f8f3df; font-size: 10px; letter-spacing: .09em; text-shadow: 0 1px 5px #182e36; pointer-events: none; }
+.player-game .foot-button { bottom: 28px; width: 130px; height: 78px; padding: 13px 22px; background: var(--game-glass); border: 1px solid #fff5de66; border-radius: 18px; color: var(--game-ivory); box-shadow: 0 6px 0 #10282ac4, 0 12px 24px #182e3630, inset 0 1px #fff5de29; }
+.player-game .foot-button--left { left: 28px; }
+.player-game .foot-button--right { right: 28px; }
+.player-game .foot-button:hover { background: #30554ee8; }
+.player-game .foot-button.is-pressed { transform: translateY(4px); background: #367b66eb; box-shadow: 0 2px 0 #10282a; }
+.player-game .foot-button.is-rejected { background: #935c38eb; }
+.player-game .foot-arrow { color: var(--game-mint); font: 28px "Bahnschrift", sans-serif; }
+.player-game .foot-button > span:nth-child(2) { font-size: 16px; letter-spacing: .12em; }
+.player-game .step-hint { bottom: 23px; font-size: 11px; letter-spacing: .12em; }
+.player-game .course-progress { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); width: min(280px, 30vw); pointer-events: none; text-shadow: 0 1px 5px #423d2e; }
+.player-game .course-progress > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 9px; font-size: 10px; }
+.player-game .course-progress strong { font: 500 13px "Bahnschrift", "Microsoft JhengHei", sans-serif; font-variant-numeric: tabular-nums; }
+.player-game .course-progress-track { height: 3px; background: #20384266; border-radius: 2px; box-shadow: 0 1px #fff5de66; overflow: hidden; }
+.player-game .course-progress-track i { display: block; width: var(--progress, 0%); height: 100%; background: var(--game-mint); transition: width 180ms; }
+.player-game .screen-overlay { justify-content: flex-start; padding-left: clamp(24px, 6vw, 100px); background: linear-gradient(90deg, #102b365e, #102b3600 75%); backdrop-filter: none; }
+.player-game .screen-card { width: min(405px, 85vw); padding: 30px; border: 1px solid #fff5de4a; border-radius: 22px; background: #172e38e8; box-shadow: 0 25px 80px #142c3633, inset 0 1px #fff5de1a; backdrop-filter: blur(16px); }
+.player-game .screen-card::before { color: #eac58b; margin-bottom: 22px; }
+.player-game .screen-card h1 { letter-spacing: .1em; }
+.player-game .screen-card ol { font-size: 15px !important; line-height: 2.1 !important; color: #e6e9df; }
+.player-game .screen-card .primary-button { width: 100%; padding: 13px; border-radius: 10px; background: var(--game-mint); color: var(--game-ink); box-shadow: inset 0 1px #ffffff70; }
+.player-game .game-toast { top: 24px; border-radius: 30px; font-size: 16px; box-shadow: 0 6px 24px #172a3033; }
+@media (max-height: 600px) and (orientation: landscape) {
+  .player-game .player-identity { top: 17px; left: 19px; gap: 10px; }
+  .player-game .player-symbol { font-size: 20px; }
+  .player-game .player-identity strong { font-size: 14px; }
+  .player-game .player-identity div > span { font-size: 9px; margin-top: 4px; }
+  .player-game .player-health { top: 67px; left: 19px; font-size: 12px; padding: 5px 9px; }
+  .player-game .player-survivors { top: 14px; right: 16px; min-width: 114px; padding: 9px 16px; border-radius: 12px; }
+  .player-game .player-survivors > span { font-size: 10px; }
+  .player-game .player-survivors > div { font-size: 19px; margin-top: 3px; }
+  .player-game .player-survivors strong { font-size: 27px; }
+  .player-game .preview-sample-note { top: 89px; right: 24px; font-size: 9px; }
+  .player-game .foot-button { bottom: 20px; width: 96px; height: 57px; padding: 9px 15px; border-radius: 13px; }
+  .player-game .foot-button--left { left: 19px; }
+  .player-game .foot-button--right { right: 19px; }
+  .player-game .foot-arrow { font-size: 22px; }
+  .player-game .foot-button > span:nth-child(2) { font-size: 13px; }
+  .player-game .step-hint { bottom: 15px; font-size: 9px; }
+  .player-game .course-progress { bottom: 39px; width: 220px; max-width: 32vw; }
+  .player-game .screen-overlay { padding-left: 24px; }
+  .player-game .screen-card { width: 350px; padding: 16px 24px; }
+  .player-game .screen-card::before { margin-bottom: 8px; }
+  .player-game .screen-card ol { font-size: 13px !important; line-height: 1.85 !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-game .course-progress-track i { transition: none; }
+}
+
+/* 主辦方沿用同一組藍灰面板與薄荷綠操作色。 */
+.host-page .host-panel { background: #182e36f0; padding: 16px; gap: 12px; }
+.host-page .host-card { background: linear-gradient(145deg, #253d46e8, #172a30d9); border-color: #fff5de2e; border-radius: 15px; box-shadow: inset 0 1px #ffffff0a; }
+.host-page .host-card h2 { letter-spacing: .08em; font-size: 15px; }
+.host-page .host-brand { background: #203842d9; border-color: #fff5de40; border-radius: 14px; backdrop-filter: blur(12px); }
+.host-page .host-card .signal-label { white-space: normal; font-size: 17px; line-height: 1.5; }
+.host-page .primary-button { background: #a0edc3; color: #182e36; border-radius: 9px; }
+.host-page .primary-button:hover { background: #bbf4d4; }
+.host-page .camera-modes button[aria-pressed="true"] { background: #327162; border-color: #a0edc380; }
+.host-page .setting-options { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.host-page .host-course-distance { margin-top: 10px; color: #d4e4dc; font: 500 13px "Bahnschrift", "Microsoft JhengHei", sans-serif; font-variant-numeric: tabular-nums; }
+.host-page .distance-setting { display: block; margin-top: 15px; }
+.host-page .distance-setting input { width: 100%; padding: 10px 12px; border: 1px solid #fff5de45; border-radius: 8px; background: #102b36a6; color: #fff5de; font: 18px "Bahnschrift", sans-serif; font-variant-numeric: tabular-nums; user-select: text; }
+.host-page .screen-card { background: #172e38ef; border-color: #fff5de4a; border-radius: 22px; }
+@media (max-width: 1000px) {
+  .host-page .host-panel { padding: 9px; gap: 8px; }
+}
+
+/* 感應模式只保留黑底文字，操作依據來自主辦方畫面與現場音樂。 */
+#app.motion-mode { background: #000; }
+.player-game.motion-mode::after { display: none; }
+.motion-mode .motion-prompt { position: absolute; top: 50%; left: 50%; width: min(90%, 520px); margin: 0; transform: translate(-50%, -100%); text-align: center; white-space: pre-line; line-height: 2; font-size: clamp(18px, 3vw, 24px); color: #eee; }
+.player-game.motion-mode .step-hint { top: calc(50% + 24px); bottom: auto; width: min(85%, 480px); white-space: normal; text-align: center; font-size: 15px; line-height: 1.8; color: #aaa; text-shadow: none; }
+.player-game.motion-mode .screen-overlay { justify-content: center; padding: 20px; background: #000; }
+.player-game.motion-mode .screen-card { background: #000; border: 0; box-shadow: none; backdrop-filter: none; }
+.player-game.motion-mode .screen-card::before { display: none; }

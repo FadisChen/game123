@@ -10,7 +10,7 @@ import { getPersistentHostId, SocketClient } from "../net/SocketClient";
 import { ClockSync } from "../net/ClockSync";
 import { HostScene } from "./HostScene";
 import { HostConsolePanel } from "./HostConsolePanel";
-import { MusicPlayer } from "../game/audio";
+import { MusicPlayer, sfx } from "../game/audio";
 
 /** 主辦方主控台的頂層控制器：建立房間、串接 HostScene（鳥瞰 3D）與 HostConsolePanel（側邊欄）。 */
 export class HostController {
@@ -53,14 +53,19 @@ export class HostController {
     const joinUrl = `${location.origin}/join/${ack.roomCode}`;
     this.panel = new HostConsolePanel(this.container, ack.roomCode, joinUrl, {
       onStart: () => {
+        sfx.unlock();
         this.music.primeFromGesture();
         void this.socketClient.startGame(this.actionPayload());
       },
       onPause: () => void this.socketClient.pauseGame(this.actionPayload()),
-      onResume: () => void this.socketClient.resumeGame(this.actionPayload()),
+      onResume: () => {
+        sfx.unlock();
+        void this.socketClient.resumeGame(this.actionPayload());
+      },
       onEnd: () => void this.socketClient.endGame(this.actionPayload()),
       onRestart: () => void this.socketClient.restartGame(this.actionPayload()),
       onMusicRetry: () => {
+        sfx.unlock();
         this.panel?.clearMusicPlaybackError();
         this.music.retry();
       },
@@ -83,6 +88,8 @@ export class HostController {
     this.socketClient.onPhaseChanged((payload) => {
       this.clock.updateFromServerNow(payload.serverNowMs);
       this.currentPhase = payload.phase;
+      this.panel?.setSettings(payload.settings);
+      this.scene?.setFinishDistance(payload.settings.finishDistanceM);
       this.panel?.setPhase(payload.phase);
       this.syncMusic(payload.serverNowMs);
     });
@@ -117,6 +124,7 @@ export class HostController {
     for (const player of snapshot.players) this.players.set(player.playerId, player);
 
     this.panel?.setSettings(snapshot.settings);
+    this.scene?.setFinishDistance(snapshot.settings.finishDistanceM);
     this.panel?.setPhase(snapshot.phase);
     this.syncMusic(snapshot.serverNowMs);
     this.refreshPlayerViews();
@@ -128,6 +136,7 @@ export class HostController {
 
   /** room:playerStepped 沒有附帶完整快照，直接局部更新那一位玩家，讓鳥瞰畫面上的位置能逐步移動而不是等下一次快照才跳動。 */
   private handlePlayerStepped(payload: RoomPlayerSteppedPayload): void {
+    if (payload.result.kind === "caught") sfx.play("caught");
     const existing = this.players.get(payload.playerId);
     if (!existing) return;
 

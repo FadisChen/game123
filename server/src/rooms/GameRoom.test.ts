@@ -321,21 +321,48 @@ test("a new room starts on the default settings and reports them in the snapshot
   assert.deepEqual(room.toSnapshot(0).settings, DEFAULT_ROOM_SETTINGS);
 });
 
+test("custom distance applies to existing players, late joins, reconnects and restarted rounds", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
+  room.join("p1", "Alice");
+  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, finishDistanceM: 0.5 });
+  room.join("p2", "Bob");
+  room.startGame(0);
+  room.markPlayerDisconnected("p1", 1);
+  room.join("p1", "Alice");
+  assert.equal(room.toSnapshot(2).settings.finishDistanceM, 0.5);
+  for (const id of ["p1", "p2"]) {
+    room.applyStep(id, "left", 100);
+    const result = room.applyStep(id, "right", 200);
+    assert.ok(result.ok);
+    if (result.ok) assert.deepEqual(result.result, { kind: "advanced", distanceAfter: 0.5, finished: true, finishedAtMs: 200 });
+  }
+  assert.equal(room.phase, "GAME_OVER");
+  assert.ok(room.getLastRanking()!.every((entry) => entry.distance === 0.5));
+  room.restart();
+  assert.equal(room.toSnapshot(300).settings.finishDistanceM, 0.5);
+  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, finishDistanceM: 80.2 });
+  room.startGame(400);
+  room.players.get("p1")!.player.distance = 50;
+  const result = room.applyStep("p1", "left", 500);
+  assert.ok(result.ok);
+  if (result.ok) assert.deepEqual(result.result, { kind: "advanced", distanceAfter: 50.32, finished: false });
+});
+
 test("updating settings while WAITING re-configures players already in the room and those joining later", () => {
   const room = new GameRoom("AB12", "host1");
   room.join("p1", "Alice");
 
-  assert.deepEqual(room.updateSettings({ maxScore: 1, playerMode: "motion" }), { ok: true });
+  assert.deepEqual(room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" }), { ok: true });
   assert.equal(room.toSnapshot(0).players[0].score, 1);
 
   room.join("p2", "Bob");
   assert.equal(room.players.get("p2")!.player.score, 1);
-  assert.deepEqual(room.toSnapshot(0).settings, { maxScore: 1, playerMode: "motion" });
+  assert.deepEqual(room.toSnapshot(0).settings, { ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" });
 });
 
 test("settings are locked once the round is under way", () => {
   const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
-  assert.deepEqual(room.updateSettings({ maxScore: 1, playerMode: "motion" }), { ok: false, error: "ROOM_NOT_WAITING" });
+  assert.deepEqual(room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" }), { ok: false, error: "ROOM_NOT_WAITING" });
   assert.deepEqual(room.toSnapshot(PLAYING_STARTS_AT).settings, DEFAULT_ROOM_SETTINGS);
 });
 
@@ -343,7 +370,7 @@ test("a maxScore of 1 room eliminates a player on their first catch", () => {
   const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
   room.join("p1", "Alice");
   room.join("p2", "Bob"); // keeps the round alive after p1 is out
-  room.updateSettings({ maxScore: 1, playerMode: "motion" });
+  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" });
   room.startGame(0);
   for (const at of [PLAYING_STARTS_AT, LOOK_AWAY_1_END, TURNING_TO_LOOK_END]) room.tick(at);
 
@@ -355,10 +382,10 @@ test("a maxScore of 1 room eliminates a player on their first catch", () => {
 test("player mode is room-scoped and does not alter the shared ghost timings", () => {
   const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
   room.join("p1", "Alice");
-  room.updateSettings({ maxScore: 3, playerMode: "motion" });
+  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 3, playerMode: "motion" });
   room.startGame(0);
   room.tick(PLAYING_STARTS_AT);
-  assert.deepEqual(room.toSnapshot(0).settings, { maxScore: 3, playerMode: "motion" });
+  assert.deepEqual(room.toSnapshot(0).settings, { ...DEFAULT_ROOM_SETTINGS, maxScore: 3, playerMode: "motion" });
   assert.equal(room.ghost!.getStateDuration(), MUSIC_TRACK_DURATION_MS);
 
   room.tick(PLAYING_STARTS_AT + MUSIC_TRACK_DURATION_MS);

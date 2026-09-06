@@ -2,12 +2,13 @@ import { requestLandscape } from "./LandscapeGuard";
 import type { PlayerMode } from "shared";
 
 const MAIN_RULES = ["交替點擊左、右腳，或按鍵盤 ← → 前進", "音樂播放時前進，鬼正面審視時停下", "被發現扣 1 分，扣到 0 分即淘汰", "抵達粉紅色終點線即獲勝"];
-const MOTION_RULES = ["上下晃動手機，一次晃動前進一步", "音樂播放時前進，鬼正面審視時停下", "感應器無法使用時可改用左右腳按鈕", "被發現扣 1 分，抵達粉紅色終點線即獲勝"];
+const MOTION_RULES = ["上下晃動手機，一次晃動前進一步", "請看主辦方畫面，音樂播放時移動、停止時保持靜止", "請允許動作感應權限；本模式不使用螢幕按鈕操作", "被發現扣 1 分，抵達終點即獲勝"];
 
 /** 教學畫面（對應 PRD 10 章 TEACHING 狀態與美術參考圖的四格教學卡）。 */
 export class TeachingScreen {
   private readonly root: HTMLDivElement;
   private readonly list: HTMLOListElement;
+  private mode: PlayerMode = "main";
 
   constructor(container: HTMLElement, onConfirm: () => void) {
     this.root = document.createElement("div");
@@ -35,7 +36,7 @@ export class TeachingScreen {
     button.className = "primary-button";
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
-      void requestLandscape();
+      if (this.mode === "main") void requestLandscape();
       onConfirm();
     });
     card.appendChild(button);
@@ -49,6 +50,7 @@ export class TeachingScreen {
   }
 
   setPlayerMode(mode: PlayerMode): void {
+    this.mode = mode;
     const rules = mode === "motion" ? MOTION_RULES : MAIN_RULES;
     this.list.replaceChildren(...rules.map((rule) => {
       const li = document.createElement("li");

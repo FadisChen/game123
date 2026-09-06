@@ -92,14 +92,14 @@ export class GameRoom {
   }
 
   /**
-   * 主辦方調整這一場的血量／玩家玩法。只在 WAITING 階段開放：開打後才換數值會讓已經扣過血的玩家
+   * 主辦方調整這一場的血量、玩家玩法與終點距離。只在 WAITING 階段開放：開打後才換數值會讓已經扣過血的玩家
    * 跟後來的判定基準不一致。套用後把已在房裡的玩家一併重設，確保所有人起始血量相同。
    */
   updateSettings(settings: RoomSettings): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "WAITING") return { ok: false, error: "ROOM_NOT_WAITING" };
     this.settings = settings;
     for (const p of this.players.values()) {
-      p.player.configure(settings.maxScore, STEP_DISTANCE_M);
+      p.player.configure(settings.maxScore, STEP_DISTANCE_M, settings.finishDistanceM);
     }
     return { ok: true };
   }
@@ -133,6 +133,7 @@ export class GameRoom {
       { isLooking: () => this.ghost?.isLooking() ?? false },
       this.settings.maxScore,
       STEP_DISTANCE_M,
+      this.settings.finishDistanceM,
     );
     this.players.set(playerId, {
       playerId,

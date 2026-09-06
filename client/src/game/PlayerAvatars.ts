@@ -1,9 +1,11 @@
 import * as THREE from "three";
-import { FINISH_DISTANCE_M, MAX_PLAYERS_PER_ROOM, type PlayerSummary } from "shared";
+import { FINISH_DISTANCE_M, MAX_PLAYERS_PER_ROOM, STEP_TWEEN_MS, type PlayerSummary } from "shared";
 import { createPlayerGeometry } from "./characterModels";
+import { FIELD_LENGTH } from "./fieldEnvironment";
 
 /** 被抓到出局時倒地的動畫長度；夠慢到旁邊的玩家看得見發生了什麼，又不會拖到整局節奏。 */
-const COLLAPSE_DURATION_MS = 600;
+export const COLLAPSE_DURATION_MS = 600;
+export const COLLAPSE_ROLL_RAD = Math.PI / 2;
 const NAME_HEIGHT_M = 1.78;
 /** 倒下後名牌跟著落到地面附近，才不會浮在半空跟躺著的身體對不起來。 */
 const NAME_COLLAPSED_HEIGHT_M = 0.5;
@@ -20,6 +22,11 @@ export interface PlayerAvatarOptions {
 interface AvatarState {
   x: number;
   z: number;
+  renderedZ: number;
+  stepFromZ: number;
+  stepStartedAt: number | null;
+  stepping: boolean;
+  stepSide: number;
   eliminated: boolean;
   connected: boolean;
   /** 第一次在 animate() 看到出局的時間戳，用來推進倒地補間；null＝還沒出局。 */
@@ -35,8 +42,9 @@ export function playerLaneX(index: number, total: number): number {
 }
 
 /** 每排 14 人從起點後方排隊；到終點時收斂到同一條線，判定距離仍由伺服器管理。 */
-export function playerWorldZ(index: number, distance: number): number {
-  return distance - Math.floor(index / 14) * 1.1 * Math.max(0, 1 - distance / FINISH_DISTANCE_M);
+export function playerWorldZ(index: number, distance: number, finishDistanceM = FINISH_DISTANCE_M): number {
+  const progress = Math.min(1, Math.max(0, distance / finishDistanceM));
+  return progress * FIELD_LENGTH - Math.floor(index / 14) * 1.1 * (1 - progress);
 }
 
 /**
@@ -106,7 +114,7 @@ export class PlayerAvatars {
     scene.add(this.mesh);
   }
 
-  update(players: PlayerSummary[], excludeId?: string): void {
+  update(players: PlayerSummary[], excludeId?: string, finishDistanceM = FINISH_DISTANCE_M): void {
     const seen = new Set<string>();
     this.order = [];
 
@@ -116,9 +124,17 @@ export class PlayerAvatars {
       this.order.push(player.playerId);
 
       const existing = this.states.get(player.playerId);
+      const z = playerWorldZ(index, player.distance, finishDistanceM);
+      const advanced = !!existing && z > existing.z && !player.eliminated;
+      const reset = !existing || z < existing.z;
       this.states.set(player.playerId, {
         x: playerLaneX(index, players.length),
-        z: playerWorldZ(index, player.distance),
+        z,
+        renderedZ: reset ? z : existing.renderedZ,
+        stepFromZ: reset ? z : advanced ? existing.renderedZ : existing.stepFromZ,
+        stepStartedAt: reset || advanced ? null : existing.stepStartedAt,
+        stepping: !player.eliminated && !reset && (advanced || existing.stepping),
+        stepSide: advanced ? -existing.stepSide : existing?.stepSide ?? 1,
         eliminated: player.eliminated,
         connected: player.connected,
         // 重玩時 eliminated 會變回 false，倒地動畫的時間戳也要跟著清掉。
@@ -139,14 +155,23 @@ export class PlayerAvatars {
       const state = this.states.get(playerId);
       if (!state) return;
 
+      let stride = 0;
+      if (state.stepping) {
+        state.stepStartedAt ??= now;
+        const t = Math.min(Math.max(now - state.stepStartedAt, 0) / STEP_TWEEN_MS, 1);
+        state.renderedZ = state.stepFromZ + (state.z - state.stepFromZ) * easeOutCubic(t);
+        stride = Math.sin(t * Math.PI);
+        if (t >= 1) state.stepping = false;
+      }
+
       let collapse = 0;
       if (state.eliminated) {
         state.collapsedAt ??= now;
         collapse = easeOutCubic(Math.min((now - state.collapsedAt) / COLLAPSE_DURATION_MS, 1));
       }
 
-      this.dummy.position.set(state.x, 0, state.z);
-      this.dummy.rotation.z = collapse * (Math.PI / 2);
+      this.dummy.position.set(state.x, stride * 0.035, state.renderedZ);
+      this.dummy.rotation.set(stride * 0.035, 0, collapse * COLLAPSE_ROLL_RAD + stride * 0.045 * state.stepSide);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(slot, this.dummy.matrix);
 
@@ -157,13 +182,14 @@ export class PlayerAvatars {
 
       const number = this.numbers.get(playerId);
       if (number) {
-        number.position.set(state.x, 0.76, state.z - 0.185);
+        number.position.set(0, 0.76, -0.217).applyMatrix4(this.dummy.matrix);
+        number.rotation.set(this.dummy.rotation.x, Math.PI, -this.dummy.rotation.z);
         number.visible = !state.eliminated;
       }
 
       const name = this.names.get(playerId);
       if (name) {
-        name.sprite.position.set(state.x, NAME_HEIGHT_M + (NAME_COLLAPSED_HEIGHT_M - NAME_HEIGHT_M) * collapse, state.z);
+        name.sprite.position.set(state.x, NAME_HEIGHT_M + stride * 0.035 + (NAME_COLLAPSED_HEIGHT_M - NAME_HEIGHT_M) * collapse, state.renderedZ);
         name.sprite.material.opacity = state.eliminated ? 0.65 : 1;
       }
     });

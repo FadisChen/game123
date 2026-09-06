@@ -51,11 +51,6 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 .survivor-count > div { margin-top: 7px; font: 500 29px/1.2 "Bahnschrift", sans-serif; font-variant-numeric: tabular-nums; }
 .survivor-count strong { color: #8deab0; font-size: 35px; }
 .player-survivors { position: absolute; top: 20px; right: 22px; min-width: 155px; padding: 14px 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); text-align: center; }
-.mute-button { pointer-events: auto; position: absolute; right: 24px; top: 134px; width: 36px; height: 34px; padding: 0; background: #243339c9; font-size: 22px; }
-.crosshair { position: absolute; top: 58%; left: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); opacity: .9; }
-.crosshair::before, .crosshair::after { content: ""; position: absolute; background: #fffde8; box-shadow: 0 1px 3px #5e512050; }
-.crosshair::before { top: 10px; width: 22px; height: 2px; }
-.crosshair::after { left: 10px; width: 2px; height: 22px; }
 .foot-button { pointer-events: auto; position: absolute; bottom: 24px; width: 108px; height: 85px; border: 1px solid #d6e6c650; border-radius: 15px; background: #253930b8; display: grid; grid-template-columns: 1fr auto; align-content: center; padding: 10px 17px; column-gap: 8px; text-align: center; touch-action: none; backdrop-filter: blur(8px); }
 .foot-button--left { left: 24px; }
 .foot-button--right { right: 24px; }
@@ -99,7 +94,7 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 .camera-modes button { font-size: 12px; padding: 7px 4px; }
 .camera-modes button[aria-pressed="true"] { background: #426a53; color: #dcf7d7; border-color: #8db99a; }
 .camera-map { display: block; width: 100%; height: 125px; margin-top: 12px; border: 1px solid #c6cfb445; border-radius: 6px; background: #1a2528; }
-.camera-dpad { display: grid; grid-template-columns: repeat(3, 33px); grid-template-rows: repeat(2, 28px); justify-content: center; gap: 4px; margin-top: 10px; }
+.camera-dpad { display: none; grid-template-columns: repeat(3, 33px); grid-template-rows: repeat(2, 28px); justify-content: center; gap: 4px; margin-top: 10px; }
 .camera-dpad button { padding: 0; font: 18px Consolas, monospace; touch-action: none; }
 .camera-dpad [data-direction="ArrowUp"] { grid-column: 2; }
 .camera-dpad [data-direction="ArrowLeft"] { grid-row: 2; grid-column: 1; }
@@ -153,7 +148,6 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
   .player-survivors > span { font-size: 12px; }
   .player-survivors > div { margin-top: 3px; font-size: 21px; }
   .player-survivors strong { font-size: 26px; }
-  .mute-button { top: 96px; right: 16px; width: 30px; height: 28px; font-size: 17px; }
   .foot-button { width: 90px; height: 67px; bottom: 14px; padding: 8px 13px; border-radius: 11px; }
   .foot-button--left { left: 14px; }
   .foot-button--right { right: 14px; }

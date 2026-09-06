@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { FINISH_DISTANCE_M } from "shared";
-import { buildFieldEnvironment, lightScene } from "../game/fieldEnvironment";
+import { buildFieldEnvironment, FIELD_LENGTH, lightScene } from "../game/fieldEnvironment";
 import { GhostVisual } from "../game/ghostVisual";
 import { OutcomeEffects } from "../game/OutcomeEffects";
 import { PlayerAvatars, playerLaneX, playerWorldZ } from "../game/PlayerAvatars";
@@ -14,7 +14,7 @@ const GHOST_OFFSET_BEYOND_FINISH_M = 1;
  * 站在起點時仍落在水平視野內——再往前就會被畫面左右邊緣裁掉。
  */
 const BIRDSEYE_POSITION = new THREE.Vector3(0, 9, -18);
-const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FINISH_DISTANCE_M * 0.75);
+const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FIELD_LENGTH * 0.75);
 const FOLLOW_HEIGHT_M = 9;
 const FOLLOW_BACK_OFFSET_M = 7;
 const FOLLOW_LOOKAHEAD_M = 5;
@@ -54,6 +54,7 @@ export class HostScene {
   private readonly latestAvatars = new Map<string, { x: number; z: number; player: HostAvatarInput }>();
   private readonly currentLookAt = BIRDSEYE_LOOK_AT.clone();
 
+  private finishDistanceM = FINISH_DISTANCE_M;
   private cameraMode: HostCameraMode = "birdseye";
   private orbitControls: OrbitControls | null = null;
   private readonly directions = new Set<string>();
@@ -79,7 +80,7 @@ export class HostScene {
 
     buildFieldEnvironment(this.scene);
 
-    const ghostZ = FINISH_DISTANCE_M + GHOST_OFFSET_BEYOND_FINISH_M;
+    const ghostZ = FIELD_LENGTH + GHOST_OFFSET_BEYOND_FINISH_M;
     this.ghostVisual = new GhostVisual(this.scene, new THREE.Vector3(0, 0, ghostZ));
 
     this.avatars = new PlayerAvatars(this.scene);
@@ -117,7 +118,7 @@ export class HostScene {
 
   /** 依目前玩家清單重新擺放所有玩家的頭像與姓名/分數標籤（依加入順序分配固定車道）。 */
   updateAvatars(players: HostAvatarInput[]): void {
-    this.avatars.update(players);
+    this.avatars.update(players, undefined, this.finishDistanceM);
     const count = players.length;
     const seenIds = new Set<string>();
 
@@ -126,7 +127,7 @@ export class HostScene {
       seenIds.add(player.playerId);
 
       const x = playerLaneX(index, players.length);
-      const z = playerWorldZ(index, player.distance);
+      const z = playerWorldZ(index, player.distance, this.finishDistanceM);
 
       this.updateLabel(player, x, z);
       this.latestAvatars.set(player.playerId, { x, z, player });
@@ -170,6 +171,10 @@ export class HostScene {
     this.onCameraModeChange?.(mode);
   }
 
+  setFinishDistance(distance: number): void {
+    this.finishDistanceM = distance;
+  }
+
   getCameraMode(): HostCameraMode {
     return this.cameraMode;
   }
@@ -201,7 +206,7 @@ export class HostScene {
         const controls = this.ensureOrbitControls();
         const next = controls.target.clone().add(movement);
         next.x = THREE.MathUtils.clamp(next.x, -24, 24);
-        next.z = THREE.MathUtils.clamp(next.z, -20, FINISH_DISTANCE_M + 20);
+        next.z = THREE.MathUtils.clamp(next.z, -20, FIELD_LENGTH + 20);
         movement.copy(next).sub(controls.target);
         controls.target.copy(next);
         this.camera.position.add(movement);

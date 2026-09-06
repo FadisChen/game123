@@ -33,11 +33,12 @@ export function installLandscapeGuard(app: HTMLElement): void {
   const button = overlay.querySelector("button")!;
   button.addEventListener("click", () => void requestLandscape(true));
   const sync = () => {
-    const portrait = !isLandscape();
+    const portrait = !isLandscape() && !app.classList.contains("motion-mode");
     app.inert = portrait;
     overlay.hidden = !portrait;
     if (portrait && app.contains(document.activeElement)) button.focus();
   };
   window.matchMedia("(orientation: landscape)").addEventListener("change", sync);
+  new MutationObserver(sync).observe(app, { attributes: true, attributeFilter: ["class"] });
   sync();
 }

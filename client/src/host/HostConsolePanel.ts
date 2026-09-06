@@ -1,7 +1,6 @@
 import QRCode from "qrcode";
 import {
   DEFAULT_ROOM_SETTINGS,
-  FINISH_DISTANCE_M,
   PLAYER_MODE_OPTIONS,
   SCORE_OPTIONS,
   type GhostState,
@@ -14,6 +13,7 @@ import {
 import type { HostCameraMode } from "./HostScene";
 import { playerLaneX, playerWorldZ } from "../game/PlayerAvatars";
 import { GameStatus } from "../ui/SignalStatus";
+import { FIELD_LENGTH } from "../game/fieldEnvironment";
 
 export interface HostConsolePanelCallbacks {
   onStart: () => void;
@@ -53,6 +53,8 @@ export class HostConsolePanel {
   private readonly actionButtons = new Map<string, HTMLButtonElement>();
   private readonly scoreButtons = new Map<number, HTMLButtonElement>();
   private readonly playerModeButtons = new Map<PlayerMode, HTMLButtonElement>();
+  private readonly distanceInput = document.createElement("input");
+  private readonly distanceEl = document.createElement("div");
   private settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS };
   private readonly mapPlayers = document.createElementNS(SVG_NS, "g");
   private readonly cameraCone = document.createElementNS(SVG_NS, "path");
@@ -81,6 +83,8 @@ export class HostConsolePanel {
     status.appendChild(this.musicRetryButton);
     this.countEl.className = "survivor-count";
     status.appendChild(this.countEl);
+    this.distanceEl.className = "host-course-distance";
+    status.appendChild(this.distanceEl);
     const actions = document.createElement("div");
     actions.className = "host-actions";
     for (const [key, label, action] of [
@@ -104,6 +108,23 @@ export class HostConsolePanel {
       (mode) => mode === "main" ? "主視角" : "感應式",
       (playerMode) => callbacks.onSettingsChange({ ...this.settings, playerMode }),
     ));
+    const distanceLabel = document.createElement("label");
+    distanceLabel.className = "setting-row distance-setting";
+    distanceLabel.innerHTML = "<span>遊戲距離（m）</span>";
+    this.distanceInput.type = "number";
+    this.distanceInput.min = "0.1";
+    this.distanceInput.step = "0.1";
+    this.distanceInput.inputMode = "decimal";
+    this.distanceInput.required = true;
+    this.distanceInput.addEventListener("change", () => {
+      if (!this.distanceInput.reportValidity() || !Number.isFinite(this.distanceInput.valueAsNumber)) {
+        this.distanceInput.value = this.settings.finishDistanceM.toFixed(1);
+        return;
+      }
+      callbacks.onSettingsChange({ ...this.settings, finishDistanceM: this.distanceInput.valueAsNumber });
+    });
+    distanceLabel.appendChild(this.distanceInput);
+    settings.appendChild(distanceLabel);
 
     const camera = this.section("鏡頭控制");
     const modes = document.createElement("div");
@@ -153,10 +174,6 @@ export class HostConsolePanel {
         window.setTimeout(release, 160);
       });
     }
-    const hint = document.createElement("p");
-    hint.className = "camera-hint";
-    hint.textContent = "方向鍵移動 · 拖曳旋轉 · 滾輪縮放";
-    camera.append(dpad, hint);
 
     this.roomDetails.className = "host-card room-details";
     this.roomDetails.open = true;
@@ -256,6 +273,8 @@ export class HostConsolePanel {
 
   setSettings(settings: RoomSettings): void {
     this.settings = settings;
+    this.distanceInput.value = settings.finishDistanceM.toFixed(1);
+    this.distanceEl.textContent = `全程 ${settings.finishDistanceM.toFixed(1)} m`;
     for (const [value, button] of this.scoreButtons) button.setAttribute("aria-pressed", String(value === settings.maxScore));
     for (const [mode, button] of this.playerModeButtons) button.setAttribute("aria-pressed", String(mode === settings.playerMode));
   }
@@ -271,6 +290,7 @@ export class HostConsolePanel {
     }
     // 開打後設定就鎖住了，整塊收起來把版面讓給鏡頭控制與玩家名單。
     this.settingsSection.hidden = phase !== "WAITING";
+    this.distanceInput.disabled = phase !== "WAITING";
     for (const button of [...this.scoreButtons.values(), ...this.playerModeButtons.values()]) {
       button.disabled = phase !== "WAITING";
     }
@@ -312,7 +332,7 @@ export class HostConsolePanel {
       this.playerListEl.appendChild(row);
       const dot = document.createElementNS(SVG_NS, "circle");
       dot.setAttribute("cx", String(120 - playerLaneX(index, players.length) * 4));
-      dot.setAttribute("cy", String(113 - playerWorldZ(index, player.distance) / FINISH_DISTANCE_M * 85));
+      dot.setAttribute("cy", String(113 - playerWorldZ(index, player.distance, this.settings.finishDistanceM) / FIELD_LENGTH * 85));
       dot.setAttribute("r", "2.3");
       dot.setAttribute("fill", player.eliminated ? "#e7908c" : "#8eecb0");
       this.mapPlayers.appendChild(dot);
@@ -331,7 +351,7 @@ export class HostConsolePanel {
 
   setCameraView(position: { x: number; z: number }, target: { x: number; z: number }): void {
     const x = Math.max(8, Math.min(232, 120 - position.x * 4));
-    const y = Math.max(8, Math.min(138, 113 - position.z / FINISH_DISTANCE_M * 85));
+    const y = Math.max(8, Math.min(138, 113 - position.z / FIELD_LENGTH * 85));
     const dx = -(target.x - position.x);
     const dy = -(target.z - position.z);
     const length = Math.hypot(dx, dy) || 1;

@@ -1,5 +1,4 @@
-import { CAUGHT_TOAST_MS, INITIAL_SCORE, type PlayerSummary } from "shared";
-import { sfx } from "../game/audio";
+import { CAUGHT_TOAST_MS, FINISH_DISTANCE_M, INITIAL_SCORE, type PlayerSummary } from "shared";
 
 export type ToastVariant = "warn" | "danger" | "success" | "info";
 
@@ -7,22 +6,18 @@ export class HUD {
   private readonly root = document.createElement("div");
   private readonly scoreEl = document.createElement("div");
   private readonly toastEl = document.createElement("div");
-  private readonly muteButton = document.createElement("button");
   private readonly sprintBannerEl = document.createElement("div");
   private readonly vignetteEl = document.createElement("div");
   private readonly playersEl = document.createElement("div");
   private readonly outcomeEl = document.createElement("div");
+  private readonly progressEl = document.createElement("div");
   private maxScore = INITIAL_SCORE;
   private toastTimer: number | undefined;
   private sprintBannerTimer: number | undefined;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, subtitle = "") {
     this.root.className = "player-hud";
     this.scoreEl.className = "player-health";
-    this.muteButton.className = "mute-button";
-    this.muteButton.type = "button";
-    this.muteButton.addEventListener("click", () => this.refreshMuteIcon(sfx.toggleMuted()));
-    this.refreshMuteIcon(sfx.isMuted());
     this.toastEl.className = "game-toast";
     this.toastEl.setAttribute("role", "status");
     this.toastEl.hidden = true;
@@ -34,19 +29,28 @@ export class HUD {
     this.outcomeEl.className = "outcome-overlay";
     this.outcomeEl.setAttribute("role", "status");
     this.outcomeEl.hidden = true;
-    const crosshair = document.createElement("div");
-    crosshair.className = "crosshair";
-    crosshair.setAttribute("aria-hidden", "true");
-    this.root.append(this.scoreEl, this.playersEl, this.muteButton, crosshair, this.toastEl, this.sprintBannerEl, this.vignetteEl, this.outcomeEl);
+    const identity = document.createElement("div");
+    identity.className = "player-identity";
+    identity.innerHTML = '<span class="player-symbol" aria-hidden="true">○ △ □</span><div><strong>123 木頭人</strong><span class="player-subtitle"></span></div>';
+    identity.querySelector(".player-subtitle")!.textContent = subtitle;
+    this.progressEl.className = "course-progress";
+    this.progressEl.setAttribute("role", "progressbar");
+    this.progressEl.setAttribute("aria-label", "前進距離");
+    this.progressEl.setAttribute("aria-valuemin", "0");
+    this.progressEl.innerHTML = '<div><span>起點</span><strong></strong><span>終點</span></div><div class="course-progress-track"><i></i></div>';
+    this.root.append(identity, this.scoreEl, this.playersEl, this.progressEl, this.toastEl, this.sprintBannerEl, this.vignetteEl, this.outcomeEl);
     container.appendChild(this.root);
     this.setScore(INITIAL_SCORE);
     this.setPlayerCount(1, 1);
+    this.setProgress(0);
   }
 
-  private refreshMuteIcon(muted: boolean): void {
-    this.muteButton.textContent = muted ? "♪ ×" : "♪";
-    this.muteButton.setAttribute("aria-label", muted ? "開啟音效" : "關閉音效");
-    this.muteButton.setAttribute("aria-pressed", String(muted));
+  setProgress(distance: number, finishDistanceM = FINISH_DISTANCE_M): void {
+    const current = Math.min(finishDistanceM, Math.max(0, distance));
+    this.progressEl.setAttribute("aria-valuenow", String(current));
+    this.progressEl.setAttribute("aria-valuemax", String(finishDistanceM));
+    this.progressEl.querySelector("strong")!.textContent = `距終點 ${(finishDistanceM - current).toFixed(1)} m`;
+    this.progressEl.style.setProperty("--progress", `${current / finishDistanceM * 100}%`);
   }
 
   /** maxScore 決定要畫幾格愛心；主辦方可以每場調整（1~3）。 */

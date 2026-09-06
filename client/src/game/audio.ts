@@ -1,44 +1,49 @@
 import type { GhostVisualState, RoomPhase } from "shared";
 
 /** 沒有音檔的短音效仍用 Web Audio API 即時合成；主要遊戲節奏由主辦方播放真實音檔。 */
-export type SfxName = "footstep" | "ghostTurn" | "caught" | "eliminated" | "victory" | "boost";
+export type SfxName = "footstep" | "ghostTurn" | "caught" | "victory" | "boost";
 
-const MUTE_STORAGE_KEY = "123-doll-sfx-muted";
-
-function readStoredMute(): boolean {
-  try {
-    return localStorage.getItem(MUTE_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeStoredMute(muted: boolean): void {
-  try {
-    localStorage.setItem(MUTE_STORAGE_KEY, muted ? "1" : "0");
-  } catch {
-    // 私密瀏覽模式等情境下 localStorage 可能不可用，靜默忽略即可。
-  }
-}
+const SHOT_URL = new URL("../../../asserts/shoot.mp3", import.meta.url).href;
+const SHOT_SPACING_SECONDS = 0.12;
 
 class SfxEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
-  private muted = readStoredMute();
+  private shotBuffer: Promise<AudioBuffer> | null = null;
+  private nextShotAt = 0;
 
-  isMuted(): boolean {
-    return this.muted;
+  /** 在按下加入／開始／踏步等使用者手勢中解鎖，廣播到達時即可播放扣分音效。 */
+  unlock(): void {
+    const ctx = this.ensureContext();
+    void this.loadShot(ctx).catch((error: unknown) => console.warn("扣分音效載入失敗", error));
   }
 
-  setMuted(muted: boolean): void {
-    this.muted = muted;
-    writeStoredMute(muted);
+  private loadShot(ctx: AudioContext): Promise<AudioBuffer> {
+    this.shotBuffer ??= fetch(SHOT_URL)
+      .then((response) => {
+        if (!response.ok) throw new Error(`shoot.mp3: HTTP ${response.status}`);
+        return response.arrayBuffer();
+      })
+      .then((data) => ctx.decodeAudioData(data))
+      .catch((error: unknown) => { this.shotBuffer = null; throw error; });
+    return this.shotBuffer;
   }
 
-  toggleMuted(): boolean {
-    this.setMuted(!this.muted);
-    return this.muted;
+  private async playShot(ctx: AudioContext): Promise<void> {
+    try {
+      const buffer = await this.loadShot(ctx);
+      // 每筆扣分事件建立獨立音源，密集扣分依序錯開，前一聲也能完整播放。
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.masterGain!);
+      const startAt = Math.max(ctx.currentTime, this.nextShotAt);
+      this.nextShotAt = startAt + SHOT_SPACING_SECONDS;
+      source.start(startAt);
+      source.onended = () => source.disconnect();
+    } catch (error) {
+      console.warn("扣分音效播放失敗", error);
+    }
   }
 
   private ensureContext(): AudioContext {
@@ -106,7 +111,6 @@ class SfxEngine {
   }
 
   play(name: SfxName): void {
-    if (this.muted) return;
     const ctx = this.ensureContext();
     const t0 = ctx.currentTime;
 
@@ -118,13 +122,7 @@ class SfxEngine {
         this.tone(ctx, t0, 0.3, 620, 200, "triangle", 0.2);
         break;
       case "caught":
-        this.tone(ctx, t0, 0.28, 220, 210, "square", 0.22);
-        this.tone(ctx, t0, 0.28, 233, 220, "square", 0.16);
-        break;
-      case "eliminated":
-        this.tone(ctx, t0, 0.22, 440, 440, "sine", 0.2);
-        this.tone(ctx, t0 + 0.2, 0.22, 370, 370, "sine", 0.2);
-        this.tone(ctx, t0 + 0.4, 0.4, 293, 220, "sine", 0.2);
+        void this.playShot(ctx);
         break;
       case "victory":
         this.tone(ctx, t0, 0.16, 523, 523, "sine", 0.2);
@@ -169,7 +167,7 @@ export class MusicPlayer {
       if (this.shouldBePlaying) return;
       this.audio.pause();
       this.audio.currentTime = 0;
-    }).catch(() => this.notifyBlocked());
+    }).catch((error: unknown) => this.handlePlayError(error));
   }
 
   retry(): void {
@@ -197,7 +195,7 @@ export class MusicPlayer {
     }
 
     if (this.audio.paused) {
-      void this.audio.play().catch(() => this.notifyBlocked());
+      void this.audio.play().catch((error: unknown) => this.handlePlayError(error));
     }
   }
 
@@ -218,5 +216,11 @@ export class MusicPlayer {
     if (this.blocked) return;
     this.blocked = true;
     this.onBlocked?.();
+  }
+
+  private handlePlayError(error: unknown): void {
+    // 狀態切換主動 pause() 可能中止尚未完成的 play()，這不代表瀏覽器拒絕播放。
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    this.notifyBlocked();
   }
 }

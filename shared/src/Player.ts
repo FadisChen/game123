@@ -18,7 +18,7 @@ export interface LookingCheck {
  * Phase 2：這個類別搬到 shared，實際上只由伺服器端 instantiate 並呼叫 step()
  * （每個房間、每位玩家各一個實例），是真正的權威判定。玩家端只做型別匯入。
  *
- * maxScore／stepDistanceM 由呼叫端（GameRoom）依該房間的設定注入；兩個參數都選填，
+ * 血量、每步距離與終點距離由呼叫端（GameRoom）依房間設定注入；參數皆可省略，
  * 省略時就是共用預設值，讓單機離線版與單元測試不必知道房間設定的存在。
  */
 export class Player {
@@ -31,11 +31,13 @@ export class Player {
   private readonly ghost: LookingCheck;
   private maxScore: number;
   private stepDistanceM: number;
+  private finishDistanceM: number;
 
-  constructor(ghost: LookingCheck, maxScore = INITIAL_SCORE, stepDistanceM = STEP_DISTANCE_M) {
+  constructor(ghost: LookingCheck, maxScore = INITIAL_SCORE, stepDistanceM = STEP_DISTANCE_M, finishDistanceM = FINISH_DISTANCE_M) {
     this.ghost = ghost;
     this.maxScore = maxScore;
     this.stepDistanceM = stepDistanceM;
+    this.finishDistanceM = finishDistanceM;
     this.score = maxScore;
   }
 
@@ -61,8 +63,8 @@ export class Player {
       return { kind: "caught", scoreAfter: this.score, eliminated: this.eliminated };
     }
 
-    this.distance = Math.min(this.distance + this.stepDistanceM * distanceMultiplier, FINISH_DISTANCE_M);
-    if (this.distance >= FINISH_DISTANCE_M) {
+    this.distance = Math.min(this.distance + this.stepDistanceM * distanceMultiplier, this.finishDistanceM);
+    if (this.distance >= this.finishDistanceM) {
       this.finished = true;
     }
     return { kind: "advanced", distanceAfter: this.distance, finished: this.finished };
@@ -72,9 +74,10 @@ export class Player {
    * 主辦方在 WAITING 階段改了房間設定：套用新數值並把整個人重置，
    * 讓已經在房裡等待的玩家跟之後才加入的玩家拿到一樣的起始血量。
    */
-  configure(maxScore: number, stepDistanceM: number): void {
+  configure(maxScore: number, stepDistanceM: number, finishDistanceM = this.finishDistanceM): void {
     this.maxScore = maxScore;
     this.stepDistanceM = stepDistanceM;
+    this.finishDistanceM = finishDistanceM;
     this.reset();
   }
 

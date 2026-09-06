@@ -1,4 +1,5 @@
 import "./style.css";
+import "./game/game-ui.css";
 import { JoinScreen } from "./ui/JoinScreen";
 import { getPersistentPlayerId, SocketClient } from "./net/SocketClient";
 import { NetworkedGameController } from "./game/NetworkedGameController";

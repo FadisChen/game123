@@ -6,24 +6,27 @@ export type PlayerMode = "main" | "motion";
 export interface RoomSettings {
   maxScore: number;
   playerMode: PlayerMode;
+  finishDistanceM: number;
 }
 
 export const SCORE_OPTIONS = [1, 2, 3] as const;
 export const PLAYER_MODE_OPTIONS = ["main", "motion"] as const satisfies readonly PlayerMode[];
-export const DEFAULT_ROOM_SETTINGS: RoomSettings = { maxScore: 3, playerMode: "main" };
+export const FINISH_DISTANCE_M = 50;
+export const DEFAULT_ROOM_SETTINGS: RoomSettings = { maxScore: 3, playerMode: "main", finishDistanceM: FINISH_DISTANCE_M };
 
 /** 主辦方送來的設定不可信（可能來自竄改過的 client），超出允許範圍一律退回預設值。 */
 export function normalizeRoomSettings(input: unknown): RoomSettings {
   const raw = (input ?? {}) as Partial<RoomSettings>;
+  const distance = typeof raw.finishDistanceM === "number" ? Math.round(raw.finishDistanceM * 10) / 10 : NaN;
   return {
     maxScore: SCORE_OPTIONS.find((option) => option === raw.maxScore) ?? DEFAULT_ROOM_SETTINGS.maxScore,
     playerMode: PLAYER_MODE_OPTIONS.find((option) => option === raw.playerMode) ?? DEFAULT_ROOM_SETTINGS.playerMode,
+    finishDistanceM: Number.isFinite(distance) && distance >= 0.1 ? distance : FINISH_DISTANCE_M,
   };
 }
 
 export const INITIAL_SCORE = DEFAULT_ROOM_SETTINGS.maxScore;
 export const STEP_DISTANCE_M = 0.32;
-export const FINISH_DISTANCE_M = 30;
 export const STEP_TWEEN_MS = 180;
 export const CAUGHT_TOAST_MS = 1000;
 export const FOOT_BUTTON_LOCKOUT_MS = 120;

@@ -7,6 +7,7 @@ import {
   type Foot,
   type GhostState,
   type GhostVisualState,
+  type PlayerSummary,
 } from "shared";
 import { HUD } from "../ui/HUD";
 import { TeachingScreen } from "../ui/TeachingScreen";
@@ -37,13 +38,27 @@ export class GameController {
   private player: Player;
   private previousGhostState: GhostState | null = null;
   private finalSprintTriggered = false;
+  private readonly previewPlayers: PlayerSummary[] = Array.from({ length: 23 }, (_, index) => ({
+    playerId: index === 6 ? "self" : `preview-${index}`,
+    name: `示意玩家 ${index + 1}`,
+    score: 3,
+    distance: index === 6 ? 0 : (index === 20 ? 28 : 3 + ((index * 7.31) % 24)) / 30 * FINISH_DISTANCE_M,
+    eliminated: false,
+    finished: false,
+    connected: true,
+  }));
 
   constructor(container: HTMLElement) {
-    this.scene = new GameScene(container);
-    this.hud = new HUD(container);
+    this.scene = new GameScene(container, false);
+    this.scene.updatePlayers(this.previewPlayers, "self");
+    this.hud = new HUD(container, "離線試玩 · 美術預覽");
     this.controls = new Controls(container, (foot) => this.handleStep(foot));
     this.teaching = new TeachingScreen(container, () => this.startPlaying());
     this.gameOver = new GameOverScreen(container, () => this.restart());
+    const sampleNote = document.createElement("span");
+    sampleNote.className = "preview-sample-note";
+    sampleNote.textContent = "場上為示意玩家";
+    container.querySelector(".player-hud")!.append(sampleNote);
     this.musicRetryButton.type = "button";
     this.musicRetryButton.className = "music-retry-button player-music-retry";
     this.musicRetryButton.textContent = "音樂播放失敗 · 點此重試";
@@ -71,9 +86,12 @@ export class GameController {
     this.gameOver.hide();
     this.teaching.setVisible(true);
     this.scene.setCameraDistanceImmediate(0);
+    this.scene.updateGhostVisual(1, false);
+    this.hud.setProgress(0);
   }
 
   private startPlaying(): void {
+    sfx.unlock();
     this.music.primeFromGesture();
     this.teaching.setVisible(false);
     this.state = "PLAYING";
@@ -87,6 +105,7 @@ export class GameController {
     this.finalSprintTriggered = false;
     this.hud.setScore(this.player.score);
     this.scene.setCameraDistanceImmediate(0);
+    this.hud.setProgress(0);
   }
 
   private handleStep(foot: Foot): void {
@@ -102,16 +121,15 @@ export class GameController {
         this.hud.setScore(result.scoreAfter);
         this.hud.showToast("被發現! -1分", "warn");
         this.scene.startCaughtShake(now);
+        sfx.play("caught");
         if (result.eliminated) {
-          sfx.play("eliminated");
           window.setTimeout(() => this.endGame("eliminated"), 400);
-        } else {
-          sfx.play("caught");
         }
         break;
       case "advanced":
         sfx.play("footstep");
         this.scene.startStepTween(result.distanceAfter, foot, now);
+        this.hud.setProgress(result.distanceAfter);
         this.maybeTriggerFinalSprint(result.distanceAfter);
         if (result.finished) {
           sfx.play("victory");
@@ -142,7 +160,7 @@ export class GameController {
   }
 
   private loop(now: number): void {
-    this.hud.setPlayerCount(this.player.score > 0 ? 1 : 0, 1);
+    this.hud.setPlayerCount(this.player.score > 0 ? 23 : 22, 23);
     if (this.state === "PLAYING") {
       this.ghost.update(now);
       const currentGhostState = this.ghost.getState();
