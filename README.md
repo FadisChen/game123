@@ -3,7 +3,7 @@
 公司年會用的 3D「123 木頭人」多人連線小遊戲。手機當手把（左右腳按鍵或上下晃動前進），大螢幕當主辦方鳥瞰主控台，鬼會隨音樂節奏回頭抓正在動的人，最先抵達終點或活到最後的人獲勝。
 
 - **玩家端**：手機瀏覽器掃 QR Code 加入房間，第一人稱視角；房間可選「主視角」按鍵或「感應式」上下晃動，一次晃動前進一步。感測器不可用時保留按鍵備援。
-- **主辦方端**：投影到大螢幕的鳥瞰 3D 場景＋控制面板（房號、QR Code、玩家清單、開始/暫停/結束/重新開始、排名、鏡頭模式切換）。
+- **主辦方端**：投影到大螢幕的鳥瞰 3D 場景＋控制面板（房號、QR Code、玩家清單、開始/暫停/結束/重新開始、排名、鏡頭模式切換、房間設定調整）。開局前可調整分數上限、玩家操作模式與終點距離。
 - **遊戲節奏**：開始後由主辦方裝置播放 `asserts/123木頭人.mp3`；音樂播放時可前進，音樂結束後鬼轉身，隨機審視 3～6 秒，再轉回去播放下一輪。每輪速度增加 0.1x，最高 2.0x。
 - 判定完全在伺服器端做（移動距離、鬼有沒有在看、有沒有被抓、加速有沒有觸發），手機端只負責顯示與送出「我踩了左/右腳」的意圖，沒有作弊空間。
 
@@ -22,7 +22,7 @@ game123/
 
 ### `shared/` — 前後端共用邏輯
 
-- `config.ts`：所有可調參數（鬼回頭時間、加速機率、房間人數上限、伺服器 tick 頻率…），前後端只有這一份，不會各自定義出不一致的數值。
+- `config.ts`：所有可調參數（鬼回頭時間、加速機率、房間人數上限、伺服器 tick 頻率…），前後端只有這一份，不會各自定義出不一致的數值。也定義了主辦方可調的房間設定 `RoomSettings`（分數上限、玩家模式、終點距離）與 `normalizeRoomSettings()`——伺服器收到主辦方送來的設定一律用這個函式重新驗證，超出允許範圍就退回預設值。
 - `Player.ts`：左右腳交替規則、扣分/淘汰/抵達終點判定，**只由伺服器 instantiate**，是唯一的權威判定邏輯。
 - `GhostAI.ts`：鬼的狀態機（`LOOK_AWAY → TURNING_TO_LOOK → LOOKING → TURNING_AWAY`）。音樂輪次與播放速度由伺服器廣播，假動作已移除。拆成兩個類別：
   - `GhostAI`：伺服器端權威版，會真的推進狀態、丟骰子。
@@ -52,27 +52,29 @@ game123/
 
 **Client → Server**（皆有 ack 回覆）：
 
-| 事件 | 說明 |
-|---|---|
-| `host:createRoom` | 主辦方建立房間，伺服器回傳高熵 `hostSessionToken` |
-| `host:resumeRoom` | 主辦方以房號與 session token 恢復房間 |
-| `host:startGame` / `pauseGame` / `resumeGame` / `endGame` / `restartGame` | 主辦方控制房間狀態；身分取自 socket session |
-| `player:joinRoom` | 玩家加入；伺服器產生 `playerId` 與 `playerSessionToken` |
-| `player:resumeRoom` | 玩家以房號、玩家 ID 與 session token 恢復房間 |
-| `player:step` | 玩家只送出 `{ foot, clientSeq }`；伺服器負責驗證、去重與限流 |
+| 事件                                                                      | 說明                                                                                                                       |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `host:createRoom`                                                         | 主辦方建立房間，伺服器回傳高熵 `hostSessionToken`                                                                          |
+| `host:resumeRoom`                                                         | 主辦方以房號與 session token 恢復房間                                                                                      |
+| `host:startGame` / `pauseGame` / `resumeGame` / `endGame` / `restartGame` | 主辦方控制房間狀態；身分取自 socket session                                                                                |
+| `host:updateSettings`                                                     | 主辦方調整房間設定（分數上限、玩家模式、終點距離），僅 `WAITING` 階段允許，伺服器一律用 `normalizeRoomSettings()` 重新驗證 |
+| `player:joinRoom`                                                         | 玩家加入；伺服器產生 `playerId` 與 `playerSessionToken`                                                                    |
+| `player:resumeRoom`                                                       | 玩家以房號、玩家 ID 與 session token 恢復房間                                                                              |
+| `player:step`                                                             | 玩家只送出 `{ foot, clientSeq }`；伺服器負責驗證、去重與限流                                                               |
 
 **Server → Room**（廣播）：
 
-| 事件 | 時機 |
-|---|---|
-| `room:state` | 完整快照，結構性變化時送出（加入/離開/階段變化等） |
-| `room:playerJoined` / `playerLeft` | 增量更新 |
-| `room:phaseChanged` | 遊戲階段推進，附帶本輪設定與時間資訊 |
-| `ghost:stateChanged` | 鬼的狀態真的轉換時送出（不逐幀送） |
-| `room:playerStepped` | 每次處理完一次踩腳後廣播 |
-| `room:playerBoostChanged` | 隨機加速視窗開始/結束 |
-| `room:playerConnectionChanged` | 斷線/重連/寬限期到期 |
-| `room:gameOver` | 結算，附上排名 |
+| 事件                               | 時機                                               |
+| ---------------------------------- | -------------------------------------------------- |
+| `room:state`                       | 完整快照，結構性變化時送出（加入/離開/階段變化等） |
+| `room:playerJoined` / `playerLeft` | 增量更新                                           |
+| `room:phaseChanged`                | 遊戲階段推進，附帶本輪設定與時間資訊               |
+| `ghost:stateChanged`               | 鬼的狀態真的轉換時送出（不逐幀送）                 |
+| `room:playerStepped`               | 每次處理完一次踩腳後廣播                           |
+| `room:playerBoostChanged`          | 隨機加速視窗開始/結束                              |
+| `room:playerConnectionChanged`     | 斷線/重連/寬限期到期                               |
+| `room:gameOver`                    | 結算，附上排名                                     |
+| `room:closed`                      | 房間被回收關閉（例如長時間沒人連線）               |
 
 建立房間或加入成功後，伺服器簽發的 session token 與房間資訊會保存於 `localStorage`。頁面重新整理或 Socket.IO 斷線重連時，客戶端會自動送出 resume；伺服器只接受目前 socket 綁定的 room/session 身分。房間狀態仍只存在單一 Node.js 程序的記憶體中，伺服器重啟後 token 與房間一併失效。
 
@@ -90,6 +92,9 @@ npm run dev         # 同時起 server（:3001）與 client dev server（:5173�
 ```bash
 npm run build       # 編譯 server（型別檢查）＋ build client（含 player.html／host.html 兩個入口）
 npm test            # 跑 shared 與 server 的單元測試（node --test，用 tsx 直接跑 TS）
+npm run lint        # ESLint（根目錄 flat config，涵蓋所有 workspace）
+npm run format      # Prettier 自動修正
+npm run format:check # Prettier 檢查（既有舊檔案還沒套用格式化，全庫跑會失敗，只需檢查有改到的檔案）
 ```
 
 ### 疑難排解：Windows 上 `npm run dev` 一啟動就掛掉
@@ -105,11 +110,11 @@ npm install
 
 ### 環境變數
 
-| 變數 | 說明 |
-|---|---|
-| `PORT` | 伺服器監聽的 port，預設 `3001` |
+| 變數              | 說明                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `PORT`            | 伺服器監聽的 port，預設 `3001`                                                                                       |
 | `GHOST_TEST_SEED` | 設定後鬼的亂數改用可重現的 xorshift32（而不是 `Math.random()`），讓 E2E 測試可以預期回頭時機。正式跑遊戲不要設這個。 |
-| `CORS_ORIGIN` | 選填；需要跨來源部署時指定允許的前端來源。未設定時以同源連線為主。 |
+| `CORS_ORIGIN`     | 選填；需要跨來源部署時指定允許的前端來源。未設定時以同源連線為主。                                                   |
 
 ### 端對端測試（Playwright）
 
@@ -143,8 +148,12 @@ LOAD_TEST_PLAYERS=150 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs   # 自
 - **隨機加速**：每位玩家每隔一段時間有機率進入短暫加速窗口，移動速度變 1.5 倍。
 - **主辦方鏡頭模式**：鳥瞰（固定機位）／跟隨領先者／跟隨落後者／自由拖曳鏡頭，四種模式可即時切換。
 
+## 部署
+
+`render.yaml` 是 Render Blueprint 設定檔（`npm ci && npm run build` 建置、`npm run start -w server` 啟動、健康檢查走 `/healthz`），連上 Render 後可直接照這份設定建立服務。
+
 ## 尚未處理
 
-- 正式部署（雲端主機、HTTPS、網域）。
+- 自訂網域／HTTPS 憑證等正式上線的收尾設定。
 - 資料持久化——目前房間狀態純記憶體，伺服器重啟就消失，也沒有活動紀錄/歷史排行榜。
 - 正式 3D 美術資源：目前的娃娃/樹/玩家都是程式合成的 sprite 貼圖，不是 `.glb` 模型。
