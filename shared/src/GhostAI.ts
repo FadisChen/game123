@@ -6,10 +6,13 @@ import {
   musicPlaybackRate,
 } from "./config";
 
-export type GhostState = "LOOK_AWAY" | "TURNING_TO_LOOK" | "LOOKING" | "TURNING_AWAY";
+export type GhostState =
+  "LOOK_AWAY" | "TURNING_TO_LOOK" | "LOOKING" | "TURNING_AWAY";
 
 function randomLookingDuration(rng: () => number): number {
-  return MUSIC_LOOKING_MIN_MS + rng() * (MUSIC_LOOKING_MAX_MS - MUSIC_LOOKING_MIN_MS);
+  return (
+    MUSIC_LOOKING_MIN_MS + rng() * (MUSIC_LOOKING_MAX_MS - MUSIC_LOOKING_MIN_MS)
+  );
 }
 
 /**
@@ -17,8 +20,15 @@ function randomLookingDuration(rng: () => number): number {
  * 抽成獨立函式，讓伺服器權威版 GhostAI 與客戶端純顯示版 GhostReplicaAI 共用同一份數學，
  * 不會有兩邊插值算法不同步的風險。
  */
-export function computeFacingAmount(state: GhostState, elapsedMs: number, durationMs: number): number {
-  const progress = durationMs > 0 ? Math.min(elapsedMs, durationMs) / durationMs : 1;
+export function computeFacingAmount(
+  state: GhostState,
+  elapsedMs: number,
+  durationMs: number,
+): number {
+  const progress =
+    durationMs > 0
+      ? Math.min(Math.max(elapsedMs, 0), durationMs) / durationMs
+      : 1;
   switch (state) {
     case "LOOK_AWAY":
       return 0;
@@ -67,7 +77,11 @@ export class GhostAI {
         break;
       case "TURNING_AWAY":
         this.musicCycle += 1;
-        this.transitionTo(now, "LOOK_AWAY", musicPhaseDurationMs(this.musicCycle));
+        this.transitionTo(
+          now,
+          "LOOK_AWAY",
+          musicPhaseDurationMs(this.musicCycle),
+        );
         break;
     }
   }
@@ -108,7 +122,11 @@ export class GhostAI {
   }
 
   getFacingPlayerAmount(now: number): number {
-    return computeFacingAmount(this.state, now - this.stateStartedAt, this.stateDuration);
+    return computeFacingAmount(
+      this.state,
+      now - this.stateStartedAt,
+      this.stateDuration,
+    );
   }
 }
 
@@ -130,7 +148,13 @@ export class GhostReplicaAI {
     this.stateStartedAt = now;
   }
 
-  applyServerState(state: GhostState, stateStartedAtMs: number, stateDurationMs: number, musicCycle = 0, musicPlaybackRate = 1): void {
+  applyServerState(
+    state: GhostState,
+    stateStartedAtMs: number,
+    stateDurationMs: number,
+    musicCycle = 0,
+    musicPlaybackRate = 1,
+  ): void {
     this.state = state;
     this.stateStartedAt = stateStartedAtMs;
     this.stateDuration = stateDurationMs;
@@ -151,7 +175,11 @@ export class GhostReplicaAI {
   }
 
   getFacingPlayerAmount(now: number): number {
-    return computeFacingAmount(this.state, now - this.stateStartedAt, this.stateDuration);
+    return computeFacingAmount(
+      this.state,
+      now - this.stateStartedAt,
+      this.stateDuration,
+    );
   }
 
   getMusicCycle(): number {

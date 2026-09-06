@@ -75,14 +75,23 @@ export class NetworkedGameController {
     this.motionPrompt.hidden = true;
     container.appendChild(this.motionPrompt);
     this.hud = new HUD(container, `${playerName} · 房間 ${roomCode}`);
-    this.controls = new Controls(container, (foot) => this.handleStepPress(foot));
+    this.controls = new Controls(container, (foot) =>
+      this.handleStepPress(foot),
+    );
     this.motionInput = new MotionInput(
       (foot) => this.handleMotionStep(foot),
-      (available) => this.controls.setMotionAvailable(available),
+      (available) => this.applyMotionAvailability(available),
     );
-    this.teaching = new TeachingScreen(container, () => void this.handleTeachingDismissed());
+    this.teaching = new TeachingScreen(
+      container,
+      () => void this.handleTeachingDismissed(),
+    );
     this.waiting = new WaitingScreen(container, playerName);
-    this.gameOver = new GameOverScreen(container, () => this.handleRestartButton(), "等待主辦方重新開始");
+    this.gameOver = new GameOverScreen(
+      container,
+      () => this.handleRestartButton(),
+      "等待主辦方重新開始",
+    );
 
     this.hud.setVisible(false);
     this.controls.setVisible(false);
@@ -107,7 +116,13 @@ export class NetworkedGameController {
     });
 
     this.socketClient.onGhostStateChanged((payload) => {
-      this.ghostReplica.applyServerState(payload.state, payload.stateStartedAtMs, payload.stateDurationMs, payload.musicCycle, payload.musicPlaybackRate);
+      this.ghostReplica.applyServerState(
+        payload.state,
+        payload.stateStartedAtMs,
+        payload.stateDurationMs,
+        payload.musicCycle,
+        payload.musicPlaybackRate,
+      );
     });
 
     this.socketClient.onPlayerStepped((payload) => {
@@ -137,10 +152,17 @@ export class NetworkedGameController {
     this.serverPhase = snapshot.phase;
     this.applyRoomSettings(snapshot.settings);
     this.players.clear();
-    for (const player of snapshot.players) this.players.set(player.playerId, player);
+    for (const player of snapshot.players)
+      this.players.set(player.playerId, player);
     this.refreshPlayers();
     if (snapshot.ghost) {
-      this.ghostReplica.applyServerState(snapshot.ghost.state, snapshot.ghost.stateStartedAtMs, snapshot.ghost.stateDurationMs, snapshot.ghost.musicCycle, snapshot.ghost.musicPlaybackRate);
+      this.ghostReplica.applyServerState(
+        snapshot.ghost.state,
+        snapshot.ghost.stateStartedAtMs,
+        snapshot.ghost.stateDurationMs,
+        snapshot.ghost.musicCycle,
+        snapshot.ghost.musicPlaybackRate,
+      );
     }
     const mine = snapshot.players.find((p) => p.playerId === this.playerId);
     if (mine) {
@@ -148,37 +170,59 @@ export class NetworkedGameController {
       this.scene?.setCameraDistanceImmediate(mine.distance);
       this.hud.setProgress(mine.distance, this.finishDistanceM);
       // 重連時可能已經在上一次連線期間被淘汰/抵達終點，用快照補回這個狀態。
-      this.myOutcome = mine.finished ? "finished" : mine.eliminated ? "eliminated" : "active";
+      this.myOutcome = mine.finished
+        ? "finished"
+        : mine.eliminated
+          ? "eliminated"
+          : "active";
     }
     this.syncScreensToPhase();
   }
 
   private applyRoomSettings(settings: RoomStateSnapshot["settings"]): void {
     this.finishDistanceM = settings.finishDistanceM;
-    if (this.playerMode !== settings.playerMode && this.serverPhase === "WAITING") {
+    const modeChanged = this.playerMode !== settings.playerMode;
+    if (modeChanged && this.serverPhase === "WAITING") {
       this.teachingDismissed = false;
     }
     this.playerMode = settings.playerMode;
-    this.container.classList.toggle("motion-mode", this.playerMode === "motion");
     if (this.playerMode === "main") {
       this.scene ??= new GameScene(this.container);
       this.scene.setFinishDistance(settings.finishDistanceM);
     }
-    if (this.scene) this.scene.renderer.domElement.hidden = this.playerMode === "motion";
+    if (this.scene)
+      this.scene.renderer.domElement.hidden = this.playerMode === "motion";
     this.controls.setMode(settings.playerMode);
     this.teaching.setPlayerMode(settings.playerMode);
     if (settings.playerMode === "main") {
       this.motionInput.stop();
-      this.controls.setMotionAvailable(false);
     }
+    if (modeChanged) this.applyMotionAvailability(false);
+  }
+
+  /** 感應器實際可不可用是「每個玩家自己的裝置」決定的，跟房間層級的 playerMode 分開追蹤；
+   * 兩者同時成立才套用直式感應版面，否則（含判定失敗、房間切回主視角）一律回退橫式按鈕操作。
+   * 移除 motion-mode class 後，LandscapeGuard 既有的 MutationObserver 會自動跳出橫向引導遮罩，
+   * 不需要在這裡搶著呼叫 requestFullscreen——那個 API 只能在使用者手勢當下呼叫，這裡的觸發時機
+   * （socket 事件、感應逾時 timeout）都不是使用者手勢，硬呼叫在部分瀏覽器反而會產生非預期的全螢幕狀態。 */
+  private applyMotionAvailability(available: boolean): void {
+    this.controls.setMotionAvailable(available);
+    this.container.classList.toggle(
+      "motion-mode",
+      this.playerMode === "motion" && available,
+    );
   }
 
   /** 重連後光靠事件流可能錯過中間狀態，所以每次拿到完整快照都重新對齊一次畫面。 */
   private syncScreensToPhase(): void {
-    this.motionPrompt.hidden = this.playerMode !== "motion" || this.myOutcome !== "active" || !["PLAYING", "PAUSED"].includes(this.serverPhase);
-    this.motionPrompt.textContent = this.serverPhase === "PAUSED"
-      ? "遊戲暫停\n請保持靜止，等待主辦方繼續"
-      : "感應模式\n請看主辦方畫面，依現場音樂移動";
+    this.motionPrompt.hidden =
+      this.playerMode !== "motion" ||
+      this.myOutcome !== "active" ||
+      !["PLAYING", "PAUSED"].includes(this.serverPhase);
+    this.motionPrompt.textContent =
+      this.serverPhase === "PAUSED"
+        ? "遊戲暫停\n請保持靜止，等待主辦方繼續"
+        : "感應模式\n請看主辦方畫面，依現場音樂移動";
     if (this.playerMode === "motion") {
       this.motionInput.setGameplayActive(this.serverPhase === "PLAYING");
     }
@@ -243,7 +287,7 @@ export class NetworkedGameController {
     this.teachingDismissed = true;
     if (this.playerMode === "motion") {
       const available = await this.motionInput.requestPermission();
-      this.controls.setMotionAvailable(available);
+      this.applyMotionAvailability(available);
     }
     if (this.serverPhase === "WAITING") {
       this.teaching.setVisible(false);
@@ -348,7 +392,10 @@ export class NetworkedGameController {
     }
     if (this.playerMode === "main") {
       const serverNow = this.clock.nowServerMs();
-      this.scene?.updateGhostVisual(this.ghostReplica.getFacingPlayerAmount(serverNow), this.ghostReplica.isLooking());
+      this.scene?.updateGhostVisual(
+        this.ghostReplica.getFacingPlayerAmount(serverNow),
+        this.ghostReplica.isLooking(),
+      );
       this.scene?.updateAnimations(serverNow);
       this.scene?.render();
     }

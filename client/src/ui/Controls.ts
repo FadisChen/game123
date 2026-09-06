@@ -32,7 +32,7 @@ export class Controls {
     container.appendChild(this.root);
 
     const press = (foot: Foot) => {
-      if (this.mode === "motion" || !this.visible || !isLandscape() || performance.now() < this.lockedUntil) return;
+      if (this.isMotionActive() || !this.visible || !isLandscape() || performance.now() < this.lockedUntil) return;
       this.lockedUntil = performance.now() + FOOT_BUTTON_LOCKOUT_MS;
       const button = foot === "left" ? this.leftButton : this.rightButton;
       button.classList.add("is-pressed");
@@ -51,7 +51,7 @@ export class Controls {
     }
     this.updateModeUi();
     window.addEventListener("keydown", (event) => {
-      if (this.mode === "motion" || !this.visible || !isLandscape() || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (this.isMotionActive() || !this.visible || !isLandscape() || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]")) return;
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
@@ -80,14 +80,18 @@ export class Controls {
     this.updateModeUi();
   }
 
+  private isMotionActive(): boolean {
+    return this.mode === "motion" && this.motionAvailable;
+  }
+
   private updateModeUi(): void {
-    const motionActive = this.mode === "motion" && this.motionAvailable;
+    const motionActive = this.isMotionActive();
     this.root.dataset.inputMode = this.mode;
     this.root.dataset.motionAvailable = String(this.motionAvailable);
-    this.leftButton.hidden = this.mode === "motion";
-    this.rightButton.hidden = this.mode === "motion";
+    this.leftButton.hidden = motionActive;
+    this.rightButton.hidden = motionActive;
     this.hint.textContent = this.mode === "motion"
-      ? motionActive ? "上下晃動，一次前進一步" : "感應器無法使用，請檢查動作感應權限或洽主辦方"
+      ? motionActive ? "上下晃動，一次前進一步" : "感應器無法使用，請改用下方左右腳按鈕"
       : "左右交替前進 · 音樂播放時移動";
   }
 }
