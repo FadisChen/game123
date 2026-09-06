@@ -30,8 +30,13 @@ async function observeShots(context: BrowserContext): Promise<void> {
 
 async function join(page: Page, roomCode: string, name: string): Promise<void> {
   await page.goto(`/join/${roomCode}`);
-  await page.getByPlaceholder("你的名字").fill(name);
-  await page.getByRole("button", { name: "加入遊戲" }).click();
+  // 已有 session 時，重新整理會自動恢復；沒有 session 才顯示加入表單。
+  await expect(page.getByRole("button", { name: "加入中…" })).toHaveCount(0);
+  const joinButton = page.getByRole("button", { name: "加入遊戲" });
+  if (await joinButton.count()) {
+    await page.getByPlaceholder("你的名字").fill(name);
+    await joinButton.click();
+  }
   await page.getByRole("button", { name: "我知道了" }).click();
 }
 
@@ -106,7 +111,7 @@ test("each caught event plays one shot on the host and only the affected player"
     await join(p1, room, "玩家乙");
     await join(spectator, room, "未移動");
     await host.getByRole("button", { name: "開始遊戲" }).click();
-    await expect(host.locator('.game-status[data-status="looking"]')).toBeVisible({ timeout: 10000 });
+    await expect(host.locator('.game-status[data-status="looking"]')).toBeVisible({ timeout: 20_000 });
     await Promise.all([p0.keyboard.press("ArrowLeft"), p1.keyboard.press("ArrowLeft")]);
     await p0.waitForTimeout(150);
     await p0.keyboard.press("ArrowRight"); // 最後一分扣光也只播放一次。

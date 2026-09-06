@@ -64,6 +64,8 @@ export const RECONNECT_GRACE_MS = 30_000; // PRD 第 19 章
 export const SERVER_TICK_MS = 100;
 export const MAX_PLAYERS_PER_ROOM = 100;
 export const ROOM_CODE_LENGTH = 4;
+export const STEP_RATE_LIMIT_WINDOW_MS = 1000;
+export const MAX_STEP_EVENTS_PER_WINDOW = 10;
 
 // 色票（對應使用者提供的美術參考圖）
 export const COLORS = {

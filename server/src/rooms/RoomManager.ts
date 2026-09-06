@@ -1,4 +1,5 @@
 import { ROOM_CODE_LENGTH } from "shared";
+import { randomInt } from "node:crypto";
 import { GameRoom, type RoomEvent } from "./GameRoom";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 排除易混淆的 0/O/1/I
@@ -7,9 +8,9 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 排除易混淆的 
 const ABANDONED_ROOM_TTL_MS = 10 * 60_000;
 
 function generateRoomCode(): string {
-  let code = "";
-  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+    let code = "";
+    for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+    code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
   }
   return code;
 }
@@ -23,7 +24,7 @@ export class RoomManager {
     this.rngFactory = rngFactory;
   }
 
-  createRoom(hostId: string): GameRoom {
+  createRoom(hostId = ""): GameRoom {
     let code = generateRoomCode();
     while (this.rooms.has(code)) code = generateRoomCode();
     const room = new GameRoom(code, hostId, this.rngFactory(), this.rngFactory());

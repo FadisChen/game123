@@ -6,8 +6,8 @@ export function broadcastSnapshot(io: Server, room: GameRoom, now: number): void
   io.to(room.code).emit(SOCKET_EVENTS.roomState, room.toSnapshot(now));
 }
 
-export function broadcastGhostState(io: Server, room: GameRoom): void {
-  const snapshot = room.toSnapshot(Date.now());
+export function broadcastGhostState(io: Server, room: GameRoom, now = Date.now()): void {
+  const snapshot = room.toSnapshot(now);
   if (snapshot.ghost) io.to(room.code).emit(SOCKET_EVENTS.ghostStateChanged, snapshot.ghost);
 }
 
@@ -28,7 +28,7 @@ export function applyRoomEvents(io: Server, room: GameRoom, events: RoomEvent[],
         }
         break;
       case "ghostStateChanged":
-        broadcastGhostState(io, room);
+        broadcastGhostState(io, room, now);
         break;
       case "gameOver":
         io.to(room.code).emit(SOCKET_EVENTS.roomGameOver, { ranking: room.getLastRanking(), reason: event.reason });

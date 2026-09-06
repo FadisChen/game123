@@ -3,25 +3,34 @@ import {
   SOCKET_EVENTS,
   normalizeRoomSettings,
   type HostCreateRoomAck,
-  type HostCreateRoomPayload,
+  type HostResumeRoomAck,
   type HostRoomActionAck,
-  type HostRoomActionPayload,
   type HostUpdateSettingsPayload,
 } from "shared";
 import type { GameRoom } from "../rooms/GameRoom";
 import type { RoomManager } from "../rooms/RoomManager";
+import { RateLimiter } from "../RateLimiter";
 import { broadcastSnapshot } from "./broadcast";
+import {
+  isEmptyPayload,
+  isHostCreateRoomPayload,
+  isHostResumeRoomPayload,
+  isHostUpdateSettingsPayload,
+  normalizeRoomCode,
+  safeAck,
+} from "./validation";
+import { getAuthenticatedHostRoom, setHostSession } from "./socketSession";
 
 function withHostRoom(
   io: Server,
+  socket: Socket,
   roomManager: RoomManager,
-  payload: HostRoomActionPayload,
   ack: (res: HostRoomActionAck) => void,
   action: (room: GameRoom, now: number) => { ok: true } | { ok: false; error: string },
 ): void {
-  const room = roomManager.getRoom(payload.roomCode);
-  if (!room || room.hostId !== payload.hostId) {
-    ack({ ok: false, error: "ROOM_NOT_FOUND" });
+  const room = getAuthenticatedHostRoom(socket, roomManager);
+  if (!room) {
+    ack({ ok: false, error: "NOT_AUTHENTICATED" });
     return;
   }
   const now = Date.now();
@@ -40,47 +49,142 @@ function withHostRoom(
     settings: snapshot.settings,
   });
   if (room.phase === "GAME_OVER") {
-    // 主辦方「結束遊戲」屬於強制結算，不會經過 tick()/applyStep() 的自然結束路徑，
-    // 所以這裡要自己補送 room:gameOver，否則玩家端永遠不會收到排名資料。
-    io.to(room.code).emit(SOCKET_EVENTS.roomGameOver, { ranking: room.getLastRanking(), reason: room.getLastGameOverReason() });
+    io.to(room.code).emit(SOCKET_EVENTS.roomGameOver, {
+      ranking: room.getLastRanking(),
+      reason: room.getLastGameOverReason(),
+    });
   }
   ack({ ok: true });
 }
 
-export function registerHostHandlers(io: Server, socket: Socket, roomManager: RoomManager): void {
-  socket.on(SOCKET_EVENTS.hostCreateRoom, (payload: HostCreateRoomPayload, ack: (res: HostCreateRoomAck) => void) => {
-    const now = Date.now();
-    const room = roomManager.createRoom(payload.hostId);
-    room.attachHostSocket(socket.id);
-    socket.data.hostId = payload.hostId;
-    socket.data.roomCode = room.code;
-    socket.join(room.code);
-    ack({ ok: true, roomCode: room.code, snapshot: room.toSnapshot(now) });
+export function registerHostHandlers(
+  io: Server,
+  socket: Socket,
+  roomManager: RoomManager,
+  createRoomLimiter: RateLimiter,
+): void {
+  socket.on(SOCKET_EVENTS.hostCreateRoom, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostCreateRoomAck>(ack);
+    try {
+      const now = Date.now();
+      if (!isHostCreateRoomPayload(payload)) {
+        reply({ ok: false, error: "INVALID_PAYLOAD" });
+        return;
+      }
+      if (socket.data.role) {
+        reply({ ok: false, error: "NOT_AUTHENTICATED" });
+        return;
+      }
+      if (!createRoomLimiter.allow(socket.handshake.address, now)) {
+        reply({ ok: false, error: "RATE_LIMITED" });
+        return;
+      }
+      const room = roomManager.createRoom();
+      room.attachHostSocket(socket.id);
+      setHostSession(socket, room);
+      socket.join(room.code);
+      reply({
+        ok: true,
+        roomCode: room.code,
+        hostSessionToken: room.getHostSessionToken(),
+        snapshot: room.toSnapshot(now),
+      });
+    } catch {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+    }
   });
 
-  socket.on(SOCKET_EVENTS.hostStartGame, (payload: HostRoomActionPayload, ack: (res: HostRoomActionAck) => void) => {
-    withHostRoom(io, roomManager, payload, ack, (room, now) => room.startGame(now));
+  socket.on(SOCKET_EVENTS.hostResumeRoom, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostResumeRoomAck>(ack);
+    try {
+      if (!isHostResumeRoomPayload(payload)) {
+        reply({ ok: false, error: "SESSION_INVALID" });
+        return;
+      }
+      if (socket.data.role) {
+        reply({ ok: false, error: "SESSION_INVALID" });
+        return;
+      }
+      const roomCode = normalizeRoomCode(payload.roomCode)!;
+      const room = roomManager.getRoom(roomCode);
+      if (!room) {
+        reply({ ok: false, error: "ROOM_NOT_FOUND" });
+        return;
+      }
+      const result = room.resumeHost(payload.sessionToken, socket.id);
+      if (!result.ok) {
+        reply(result);
+        return;
+      }
+      setHostSession(socket, room);
+      socket.join(room.code);
+      const now = Date.now();
+      reply({
+        ok: true,
+        roomCode: room.code,
+        sessionToken: payload.sessionToken,
+        snapshot: room.toSnapshot(now),
+      });
+      broadcastSnapshot(io, room, now);
+    } catch {
+      reply({ ok: false, error: "SESSION_INVALID" });
+    }
   });
 
-  socket.on(SOCKET_EVENTS.hostPauseGame, (payload: HostRoomActionPayload, ack: (res: HostRoomActionAck) => void) => {
-    withHostRoom(io, roomManager, payload, ack, (room, now) => room.pause(now));
+  socket.on(SOCKET_EVENTS.hostStartGame, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isEmptyPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    withHostRoom(io, socket, roomManager, reply, (room, now) => room.startGame(now));
   });
 
-  socket.on(SOCKET_EVENTS.hostResumeGame, (payload: HostRoomActionPayload, ack: (res: HostRoomActionAck) => void) => {
-    withHostRoom(io, roomManager, payload, ack, (room, now) => room.resume(now));
+  socket.on(SOCKET_EVENTS.hostPauseGame, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isEmptyPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    withHostRoom(io, socket, roomManager, reply, (room, now) => room.pause(now));
   });
 
-  socket.on(SOCKET_EVENTS.hostEndGame, (payload: HostRoomActionPayload, ack: (res: HostRoomActionAck) => void) => {
-    withHostRoom(io, roomManager, payload, ack, (room) => room.forceEndGame());
+  socket.on(SOCKET_EVENTS.hostResumeGame, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isEmptyPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    withHostRoom(io, socket, roomManager, reply, (room, now) => room.resume(now));
   });
 
-  socket.on(SOCKET_EVENTS.hostRestartGame, (payload: HostRoomActionPayload, ack: (res: HostRoomActionAck) => void) => {
-    withHostRoom(io, roomManager, payload, ack, (room) => room.restart());
+  socket.on(SOCKET_EVENTS.hostEndGame, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isEmptyPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    withHostRoom(io, socket, roomManager, reply, (room) => room.forceEndGame());
   });
 
-  socket.on(SOCKET_EVENTS.hostUpdateSettings, (payload: HostUpdateSettingsPayload, ack: (res: HostRoomActionAck) => void) => {
-    // 走 withHostRoom 是為了沿用它的主辦方身分驗證與「套用後廣播完整快照」——玩家端就是靠這份
-    // 快照裡的 settings.maxScore 決定 HUD 要畫幾格愛心。
-    withHostRoom(io, roomManager, payload, ack, (room) => room.updateSettings(normalizeRoomSettings(payload.settings)));
+  socket.on(SOCKET_EVENTS.hostRestartGame, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isEmptyPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    withHostRoom(io, socket, roomManager, reply, (room) => room.restart());
+  });
+
+  socket.on(SOCKET_EVENTS.hostUpdateSettings, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isHostUpdateSettingsPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    const settingsPayload = payload as HostUpdateSettingsPayload;
+    withHostRoom(io, socket, roomManager, reply, (room) =>
+      room.updateSettings(normalizeRoomSettings(settingsPayload.settings)),
+    );
   });
 }

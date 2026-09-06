@@ -47,7 +47,7 @@
 .player-game .course-progress strong { font: 500 13px "Bahnschrift", "Microsoft JhengHei", sans-serif; font-variant-numeric: tabular-nums; }
 .player-game .course-progress-track { height: 3px; background: #20384266; border-radius: 2px; box-shadow: 0 1px #fff5de66; overflow: hidden; }
 .player-game .course-progress-track i { display: block; width: var(--progress, 0%); height: 100%; background: var(--game-mint); transition: width 180ms; }
-.player-game .screen-overlay { justify-content: flex-start; padding-left: clamp(24px, 6vw, 100px); background: linear-gradient(90deg, #102b365e, #102b3600 75%); backdrop-filter: none; }
+.player-game .screen-overlay { justify-content: center; padding: 16px; background: linear-gradient(90deg, #102b365e, #102b3600 75%); backdrop-filter: none; }
 .player-game .screen-card { width: min(405px, 85vw); padding: 30px; border: 1px solid #fff5de4a; border-radius: 22px; background: #172e38e8; box-shadow: 0 25px 80px #142c3633, inset 0 1px #fff5de1a; backdrop-filter: blur(16px); }
 .player-game .screen-card::before { color: #eac58b; margin-bottom: 22px; }
 .player-game .screen-card h1 { letter-spacing: .1em; }
@@ -72,7 +72,7 @@
   .player-game .foot-button > span:nth-child(2) { font-size: 13px; }
   .player-game .step-hint { bottom: 15px; font-size: 9px; }
   .player-game .course-progress { bottom: 39px; width: 220px; max-width: 32vw; }
-  .player-game .screen-overlay { padding-left: 24px; }
+  .player-game .screen-overlay { padding: 16px; }
   .player-game .screen-card { width: 350px; padding: 16px 24px; }
   .player-game .screen-card::before { margin-bottom: 8px; }
   .player-game .screen-card ol { font-size: 13px !important; line-height: 1.85 !important; }

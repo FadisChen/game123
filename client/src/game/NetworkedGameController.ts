@@ -1,4 +1,5 @@
 import {
+  type ConnectionState,
   FINAL_SPRINT_REMAINING_M,
   FINISH_DISTANCE_M,
   GhostReplicaAI,
@@ -18,7 +19,7 @@ import { Controls } from "../ui/Controls";
 import { GameScene } from "./Scene";
 import { sfx } from "./audio";
 import { ClockSync } from "../net/ClockSync";
-import type { SocketClient } from "../net/SocketClient";
+import { clearPlayerSession, type SocketClient } from "../net/SocketClient";
 import { MotionInput } from "../input/MotionInput";
 
 /**
@@ -39,7 +40,6 @@ export class NetworkedGameController {
   private readonly clock = new ClockSync();
   private readonly ghostReplica = new GhostReplicaAI(0);
   private readonly playerId: string;
-  private readonly roomCode: string;
   private readonly players = new Map<string, PlayerSummary>();
   private playersDirty = false;
 
@@ -48,7 +48,8 @@ export class NetworkedGameController {
   private playerMode: PlayerMode = "main";
   private finishDistanceM = FINISH_DISTANCE_M;
   private finalSprintTriggered = false;
-  private nextClientSeq = 0;
+  private connectionState: ConnectionState = "connected";
+  private resumeInFlight = false;
   /** 個人結果可能早於整個房間的回合結束（其他玩家還在玩），跟房間階段分開追蹤。 */
   private myOutcome: "active" | "eliminated" | "finished" = "active";
 
@@ -65,7 +66,6 @@ export class NetworkedGameController {
     initialSnapshot: RoomStateSnapshot,
   ) {
     this.socketClient = socketClient;
-    this.roomCode = roomCode;
     this.playerId = playerId;
 
     this.container = container;
@@ -89,7 +89,7 @@ export class NetworkedGameController {
     this.waiting = new WaitingScreen(container, playerName);
     this.gameOver = new GameOverScreen(
       container,
-      () => this.handleRestartButton(),
+      undefined,
       "等待主辦方重新開始",
     );
 
@@ -100,6 +100,8 @@ export class NetworkedGameController {
     this.gameOver.hide();
 
     this.wireSocketEvents();
+    this.socketClient.onConnectionState((state) => this.setConnectionState(state));
+    this.socketClient.onReconnect(() => void this.resumeSession());
     this.applySnapshot(initialSnapshot);
 
     requestAnimationFrame(() => this.loop());
@@ -145,6 +147,35 @@ export class NetworkedGameController {
     });
 
     this.socketClient.onGameOver((payload) => this.handleGameOver(payload));
+  }
+
+  private setConnectionState(state: ConnectionState): void {
+    this.connectionState = state;
+    this.syncScreensToPhase();
+  }
+
+  private async resumeSession(): Promise<void> {
+    if (this.resumeInFlight) return;
+    this.resumeInFlight = true;
+    try {
+      const ack = await this.socketClient.resumePlayerRoom();
+      if (!ack.ok) {
+        clearPlayerSession();
+        this.controls.setVisible(false);
+        this.teaching.setVisible(false);
+        this.waiting.setMessage("遊戲服務已重新啟動");
+        this.waiting.showError("請重新掃描 QR Code 加入遊戲");
+        this.waiting.setVisible(true);
+        return;
+      }
+      this.setConnectionState("connected");
+      this.applySnapshot(ack.snapshot);
+    } catch {
+      this.waiting.setMessage("重新連線中…");
+      this.waiting.setVisible(true);
+    } finally {
+      this.resumeInFlight = false;
+    }
   }
 
   private applySnapshot(snapshot: RoomStateSnapshot): void {
@@ -215,6 +246,19 @@ export class NetworkedGameController {
 
   /** 重連後光靠事件流可能錯過中間狀態，所以每次拿到完整快照都重新對齊一次畫面。 */
   private syncScreensToPhase(): void {
+    if (this.connectionState !== "connected") {
+      this.motionPrompt.hidden = true;
+      this.motionInput.setGameplayActive(false);
+      this.controls.setVisible(false);
+      this.teaching.setVisible(false);
+      this.gameOver.hide();
+      this.waiting.setMessage(
+        this.connectionState === "reconnecting" ? "重新連線中…" : "連線已中斷，正在嘗試重新連線…",
+      );
+      this.waiting.setVisible(true);
+      return;
+    }
+    this.waiting.clearError();
     this.motionPrompt.hidden =
       this.playerMode !== "motion" ||
       this.myOutcome !== "active" ||
@@ -296,14 +340,16 @@ export class NetworkedGameController {
   }
 
   private handleStepPress(foot: Foot): void {
-    if (this.serverPhase !== "PLAYING" || this.myOutcome !== "active") return;
+    if (
+      this.connectionState !== "connected" ||
+      this.serverPhase !== "PLAYING" ||
+      this.myOutcome !== "active"
+    )
+      return;
     sfx.unlock();
-    void this.socketClient.step({
-      roomCode: this.roomCode,
-      playerId: this.playerId,
-      foot,
-      clientSeq: this.nextClientSeq++,
-    });
+    void this.socketClient
+      .step({ foot, clientSeq: this.socketClient.getNextPlayerClientSeq() })
+      .catch(() => undefined);
   }
 
   private handleMotionStep(foot: Foot): void {
@@ -375,12 +421,6 @@ export class NetworkedGameController {
     const mine = payload.ranking.find((r) => r.playerId === this.playerId);
     const outcome: GameOutcome = mine?.outcome ?? "surviving";
     this.gameOver.showResult(outcome);
-  }
-
-  /** 玩家端沒有主控權——重玩由主辦方觸發，這裡的按鈕純粹是提示用，實際畫面切換交給 room:phaseChanged。 */
-  private handleRestartButton(): void {
-    this.hud.resetFinalSprint();
-    this.finalSprintTriggered = false;
   }
 
   private loop(): void {

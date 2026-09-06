@@ -9,6 +9,7 @@ import { registerHostHandlers } from "./sockets/hostHandlers";
 import { registerPlayerHandlers } from "./sockets/playerHandlers";
 import { registerDisconnectHandler } from "./sockets/disconnectHandler";
 import { applyRoomEvents, broadcastSnapshot } from "./sockets/broadcast";
+import { RateLimiter } from "./RateLimiter";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -36,6 +37,9 @@ function createRngFactory(): () => () => number {
 
 const app = express();
 app.use(express.static(CLIENT_DIST));
+app.get("/healthz", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
 app.get("/join/:code", (_req, res) => {
   res.sendFile(path.join(CLIENT_DIST, "player.html"));
 });
@@ -47,12 +51,18 @@ app.get("/", (_req, res) => {
 });
 
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors: { origin: "*" } });
+const corsOrigin = process.env.CORS_ORIGIN;
+const io = new Server(httpServer, {
+  ...(corsOrigin ? { cors: { origin: corsOrigin } } : {}),
+  maxHttpBufferSize: 16 * 1024,
+});
 const roomManager = new RoomManager(createRngFactory());
+const createRoomLimiter = new RateLimiter(60_000, 10);
+const joinRoomLimiter = new RateLimiter(60_000, 300);
 
 io.on("connection", (socket) => {
-  registerHostHandlers(io, socket, roomManager);
-  registerPlayerHandlers(io, socket, roomManager);
+  registerHostHandlers(io, socket, roomManager, createRoomLimiter);
+  registerPlayerHandlers(io, socket, roomManager, joinRoomLimiter);
   registerDisconnectHandler(io, socket, roomManager);
 });
 

@@ -3,8 +3,9 @@ services:
     name: game123
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm run start -w server
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
         value: 22

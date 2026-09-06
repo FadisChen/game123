@@ -394,3 +394,52 @@ test("player mode is room-scoped and does not alter the shared ghost timings", (
   assert.equal(room.ghost!.getState(), "LOOKING");
   assert.equal(room.ghost!.getStateDuration(), MUSIC_LOOKING_MIN_MS);
 });
+
+test("session tokens resume only the matching host and player", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng());
+  room.join("p1", "Alice");
+  const hostToken = room.getHostSessionToken();
+  const playerToken = room.getPlayerSessionToken("p1");
+  assert.equal(hostToken.length >= 32, true);
+  assert.ok(playerToken && playerToken.length >= 32);
+
+  assert.deepEqual(room.resumeHost("wrong-token", "host-new"), { ok: false, error: "SESSION_INVALID" });
+  assert.deepEqual(room.resumeHost(hostToken, "host-new"), { ok: true });
+  assert.deepEqual(room.resumePlayer("p1", "wrong-token", "player-new"), { ok: false, error: "SESSION_INVALID" });
+  assert.deepEqual(room.resumePlayer("p1", playerToken!, "player-new"), { ok: true });
+  assert.equal(room.players.get("p1")?.socketId, "player-new");
+});
+
+test("a stale disconnect cannot replace the current socket", () => {
+  const room = new GameRoom("AB12", "host1");
+  room.join("p1", "Alice");
+  room.attachSocket("p1", "old-socket");
+  room.resumePlayer("p1", room.getPlayerSessionToken("p1")!, "new-socket");
+
+  assert.equal(room.markPlayerDisconnected("p1", 100, "old-socket"), false);
+  assert.equal(room.players.get("p1")?.connected, true);
+  assert.equal(room.markPlayerDisconnected("p1", 100, "new-socket"), true);
+  assert.equal(room.players.get("p1")?.connected, false);
+});
+
+test("clientSeq makes retries idempotent and limits accepted steps per second", () => {
+  const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
+  const first = room.applyStep("p1", "left", 100, 0);
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+
+  const duplicate = room.applyStep("p1", "right", 200, 0);
+  assert.deepEqual(duplicate, {
+    ok: true,
+    result: first.result,
+    ghostChanged: false,
+    concluded: null,
+    duplicate: true,
+  });
+
+  for (let seq = 1; seq < 10; seq++) {
+    assert.equal(room.applyStep("p1", "left", 300, seq).ok, true);
+  }
+  assert.deepEqual(room.applyStep("p1", "right", 400, 10), { ok: false, error: "RATE_LIMITED" });
+  assert.deepEqual(room.applyStep("p1", "right", 1200, 10).ok, true);
+});

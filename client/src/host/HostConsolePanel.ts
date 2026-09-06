@@ -4,6 +4,7 @@ import {
   PLAYER_MODE_OPTIONS,
   SCORE_OPTIONS,
   type GhostState,
+  type ConnectionState,
   type PlayerMode,
   type PlayerSummary,
   type RankedPlayer,
@@ -46,6 +47,7 @@ export class HostConsolePanel {
   private readonly signal = new GameStatus();
   private readonly musicRetryButton = document.createElement("button");
   private readonly phaseEl = document.createElement("span");
+  private readonly connectionEl = document.createElement("p");
   private readonly countEl = document.createElement("div");
   private readonly playerListEl = document.createElement("div");
   private readonly rankingOverlay = document.createElement("div");
@@ -90,6 +92,9 @@ export class HostConsolePanel {
     const status = this.section("遊戲狀態");
     this.phaseEl.className = "phase-label";
     status.append(this.phaseEl, this.signal.root);
+    this.connectionEl.className = "host-connection-status";
+    this.connectionEl.hidden = true;
+    status.appendChild(this.connectionEl);
     this.musicRetryButton.type = "button";
     this.musicRetryButton.className = "music-retry-button";
     this.musicRetryButton.textContent = "啟用音樂";
@@ -416,6 +421,21 @@ export class HostConsolePanel {
   clearMusicPlaybackError(): void {
     this.musicRetryButton.textContent = "啟用音樂";
     this.musicRetryButton.hidden = true;
+  }
+
+  setConnectionState(state: ConnectionState): void {
+    this.connectionEl.hidden = state === "connected";
+    this.connectionEl.textContent =
+      state === "connecting"
+        ? "正在連線…"
+        : state === "reconnecting"
+          ? "連線異常，正在重新連線…"
+          : "連線已中斷，請稍候…";
+  }
+
+  showConnectionError(message: string): void {
+    this.connectionEl.hidden = false;
+    this.connectionEl.textContent = message;
   }
 
   setGhostState(state: GhostState): void {

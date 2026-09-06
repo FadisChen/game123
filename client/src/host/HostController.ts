@@ -1,12 +1,17 @@
 import {
   GhostReplicaAI,
+  type ConnectionState,
   type GhostVisualState,
   type PlayerSummary,
   type RoomPlayerBoostChangedPayload,
   type RoomPlayerSteppedPayload,
   type RoomStateSnapshot,
 } from "shared";
-import { getPersistentHostId, SocketClient } from "../net/SocketClient";
+import {
+  clearHostSession,
+  getStoredHostSession,
+  SocketClient,
+} from "../net/SocketClient";
 import { ClockSync } from "../net/ClockSync";
 import { HostScene } from "./HostScene";
 import { HostConsolePanel } from "./HostConsolePanel";
@@ -21,7 +26,6 @@ export class HostController {
   private readonly music = new MusicPlayer(() =>
     this.panel?.showMusicPlaybackError(),
   );
-  private readonly hostId = getPersistentHostId();
   private readonly players = new Map<string, PlayerSummary>();
   /** 上一幀每位玩家的勝負狀態，用來偵測「剛出局／剛抵達」的那一瞬間好放特效。 */
   private readonly lastOutcome = new Map<
@@ -37,28 +41,62 @@ export class HostController {
   private startSequenceActive = false;
   private currentPhase: RoomStateSnapshot["phase"] = "WAITING";
   private currentGhost: GhostVisualState | null = null;
+  private connectionState: ConnectionState = "connecting";
+  private sessionNotice = "";
 
   constructor(container: HTMLElement) {
     this.container = container;
     this.wireSocketEvents();
+    this.socketClient.onConnectionState((state) => this.setConnectionState(state));
+    this.socketClient.onReconnect(() => void this.resumeSession());
     void this.createRoom();
     requestAnimationFrame(() => this.loop());
   }
 
   private async createRoom(): Promise<void> {
-    const ack = await this.socketClient.createRoom({ hostId: this.hostId });
+    const storedSession = getStoredHostSession();
+    if (storedSession) {
+      this.socketClient.setHostSession(storedSession);
+      try {
+        const resumed = await this.socketClient.resumeHostRoom();
+        if (resumed.ok) {
+          this.roomCode = resumed.roomCode;
+          this.setupRoom(resumed.snapshot);
+          return;
+        }
+        clearHostSession();
+        this.sessionNotice = "房間已失效，請重新建立房間";
+      } catch {
+        this.sessionNotice = "無法恢復房間，正在建立新房間…";
+      }
+    }
+
+    const ack = await this.socketClient.createRoom({});
     if (!ack.ok) {
       this.container.innerHTML = `<div style="color:#fff;padding:24px;font-size:18px;">建立房間失敗，請重新整理頁面再試一次。</div>`;
       return;
     }
     this.roomCode = ack.roomCode;
+    this.socketClient.setHostSession({ roomCode: ack.roomCode, sessionToken: ack.hostSessionToken });
+    this.setupRoom(ack.snapshot);
+  }
+
+  private setupRoom(snapshot: RoomStateSnapshot): void {
     const viewport = document.createElement("div");
     viewport.className = "host-viewport";
+    this.container.replaceChildren();
+    if (this.sessionNotice) {
+      const notice = document.createElement("p");
+      notice.textContent = this.sessionNotice;
+      notice.style.cssText = "color:#f4a261;padding:12px 24px;margin:0;";
+      this.container.appendChild(notice);
+      this.sessionNotice = "";
+    }
     this.container.appendChild(viewport);
     this.scene = new HostScene(viewport);
 
-    const joinUrl = `${location.origin}/join/${ack.roomCode}`;
-    this.panel = new HostConsolePanel(this.container, ack.roomCode, joinUrl, {
+    const joinUrl = `${location.origin}/join/${this.roomCode}`;
+    this.panel = new HostConsolePanel(this.container, this.roomCode, joinUrl, {
       onStart: () => {
         if (this.startSequenceActive) return;
         this.startSequenceActive = true;
@@ -70,17 +108,17 @@ export class HostController {
           this.panel?.playCountdown(() => {
             this.startSequenceActive = false;
             this.panel?.setStarting(false);
-            void this.socketClient.startGame(this.actionPayload());
+            this.runAction(this.socketClient.startGame(this.actionPayload()));
           });
         });
       },
-      onPause: () => void this.socketClient.pauseGame(this.actionPayload()),
+      onPause: () => this.runAction(this.socketClient.pauseGame(this.actionPayload())),
       onResume: () => {
         sfx.unlock();
-        void this.socketClient.resumeGame(this.actionPayload());
+        this.runAction(this.socketClient.resumeGame(this.actionPayload()));
       },
-      onEnd: () => void this.socketClient.endGame(this.actionPayload()),
-      onRestart: () => void this.socketClient.restartGame(this.actionPayload()),
+      onEnd: () => this.runAction(this.socketClient.endGame(this.actionPayload())),
+      onRestart: () => this.runAction(this.socketClient.restartGame(this.actionPayload())),
       onMusicRetry: () => {
         sfx.unlock();
         this.panel?.clearMusicPlaybackError();
@@ -90,19 +128,45 @@ export class HostController {
       onCameraDirection: (direction, pressed) =>
         this.scene?.setDirectionPressed(direction, pressed),
       onSettingsChange: (settings) =>
-        void this.socketClient.updateSettings({
-          ...this.actionPayload(),
-          settings,
-        }),
+        this.runAction(this.socketClient.updateSettings({ settings })),
     });
     this.scene.onCameraModeChange = (mode) =>
       this.panel?.setActiveCameraMode(mode);
 
-    this.applySnapshot(ack.snapshot);
+    this.applySnapshot(snapshot);
+    this.panel.setConnectionState(this.connectionState);
   }
 
-  private actionPayload(): { roomCode: string; hostId: string } {
-    return { roomCode: this.roomCode, hostId: this.hostId };
+  private actionPayload(): Record<string, never> {
+    return {};
+  }
+
+  private runAction(request: Promise<{ ok: true } | { ok: false; error: string }>): void {
+    void request
+      .then((ack) => {
+        if (!ack.ok) this.panel?.showConnectionError(`控制操作失敗：${ack.error}`);
+      })
+      .catch(() => this.panel?.showConnectionError("連線逾時，請稍候再試"));
+  }
+
+  private setConnectionState(state: ConnectionState): void {
+    this.connectionState = state;
+    this.panel?.setConnectionState(state);
+  }
+
+  private async resumeSession(): Promise<void> {
+    try {
+      const ack = await this.socketClient.resumeHostRoom();
+      if (!ack.ok) {
+        clearHostSession();
+        this.panel?.showConnectionError("房間已失效，請重新建立房間");
+        return;
+      }
+      this.setConnectionState("connected");
+      this.applySnapshot(ack.snapshot);
+    } catch {
+      this.panel?.showConnectionError("連線逾時，正在等待重新連線…");
+    }
   }
 
   private wireSocketEvents(): void {

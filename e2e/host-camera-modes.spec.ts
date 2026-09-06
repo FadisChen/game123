@@ -37,7 +37,10 @@ async function joinPlayer(context: BrowserContext, baseURL: string, roomCode: st
 }
 
 async function readPersistentPlayerId(page: Page): Promise<string> {
-  const id = await page.evaluate(() => localStorage.getItem("123-doll-player-id"));
+  const id = await page.evaluate(() => {
+    const raw = localStorage.getItem("123-doll-player-session");
+    return raw ? (JSON.parse(raw) as { playerId?: string }).playerId ?? null : null;
+  });
   if (!id) throw new Error("讀不到玩家的持久 id");
   return id;
 }
@@ -111,7 +114,7 @@ test("host camera modes switch correctly and keep the 3D scene alive", async ({ 
   const p1Id = await readPersistentPlayerId(p1);
 
   await hostPage.locator("button", { hasText: "開始遊戲" }).click();
-  await hostPage.waitForTimeout(250); // 開始後直接進入 PLAYING；音樂播放期約 4.8 秒
+  await expect(hostPage.locator(".phase-label")).toHaveText("遊戲進行中", { timeout: 15_000 });
 
   // 只讓 p0 前進，製造出領先/落後的明顯距離差，這樣「領先者/落後者」模式才有意義可以驗證。
   // 踩腳全部塞在第一輪音樂播放期內，避免撞上鬼回頭導致玩家被淘汰；間隔只比按鈕鎖定時間長一點點。

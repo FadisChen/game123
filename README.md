@@ -54,10 +54,12 @@ game123/
 
 | 事件 | 說明 |
 |---|---|
-| `host:createRoom` | 主辦方建立房間 |
-| `host:startGame` / `pauseGame` / `resumeGame` / `endGame` / `restartGame` | 主辦方控制房間狀態 |
-| `player:joinRoom` | 玩家加入（帶持久 `playerId`，重連也走這個） |
-| `player:step` | 玩家送出「踩了左/右腳」的意圖 |
+| `host:createRoom` | 主辦方建立房間，伺服器回傳高熵 `hostSessionToken` |
+| `host:resumeRoom` | 主辦方以房號與 session token 恢復房間 |
+| `host:startGame` / `pauseGame` / `resumeGame` / `endGame` / `restartGame` | 主辦方控制房間狀態；身分取自 socket session |
+| `player:joinRoom` | 玩家加入；伺服器產生 `playerId` 與 `playerSessionToken` |
+| `player:resumeRoom` | 玩家以房號、玩家 ID 與 session token 恢復房間 |
+| `player:step` | 玩家只送出 `{ foot, clientSeq }`；伺服器負責驗證、去重與限流 |
 
 **Server → Room**（廣播）：
 
@@ -72,7 +74,7 @@ game123/
 | `room:playerConnectionChanged` | 斷線/重連/寬限期到期 |
 | `room:gameOver` | 結算，附上排名 |
 
-每個客戶端第一次載入會產生一個持久 `playerId`/`hostId`（存在 `localStorage`），所有事件都帶著這個 id，跟每次連線都會變的 Socket.IO `socket.id` 脫鉤，重新整理頁面或斷線重連都能接回原本的狀態。
+建立房間或加入成功後，伺服器簽發的 session token 與房間資訊會保存於 `localStorage`。頁面重新整理或 Socket.IO 斷線重連時，客戶端會自動送出 resume；伺服器只接受目前 socket 綁定的 room/session 身分。房間狀態仍只存在單一 Node.js 程序的記憶體中，伺服器重啟後 token 與房間一併失效。
 
 ## 開發
 
@@ -107,12 +109,15 @@ npm install
 |---|---|
 | `PORT` | 伺服器監聽的 port，預設 `3001` |
 | `GHOST_TEST_SEED` | 設定後鬼的亂數改用可重現的 xorshift32（而不是 `Math.random()`），讓 E2E 測試可以預期回頭時機。正式跑遊戲不要設這個。 |
+| `CORS_ORIGIN` | 選填；需要跨來源部署時指定允許的前端來源。未設定時以同源連線為主。 |
 
 ### 端對端測試（Playwright）
 
 ```bash
 npx playwright test
 ```
+
+伺服器提供 `GET /healthz`，Render 使用 `/healthz` 作為健康檢查路徑。Socket.IO 預設先使用 polling，連線可用時自動升級 WebSocket；單次 ack 等待超過 5 秒會回報逾時。
 
 `playwright.config.ts` 會自動幫你把 `server`（:3001）跟 `client`（:5173）都啟動起來再跑測試。如果環境預先裝好的 Chromium 版本跟 `@playwright/test` 預期抓的 revision 對不上（沙盒/CI 環境常見），設定 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指到實際的可執行檔路徑即可跳過重新下載：
 

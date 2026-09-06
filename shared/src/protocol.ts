@@ -14,9 +14,22 @@ export type JoinErrorCode =
   | "NAME_TAKEN"
   | "NAME_INVALID"
   | "GAME_ALREADY_STARTED"
-  | "ROOM_FULL";
+  | "ROOM_FULL"
+  | "SESSION_INVALID"
+  | "INVALID_PAYLOAD"
+  | "RATE_LIMITED";
 
-export type StepErrorCode = "NOT_YOUR_TURN" | "ROOM_NOT_PLAYING" | "UNKNOWN_PLAYER";
+export type ResumeErrorCode = "ROOM_NOT_FOUND" | "SESSION_INVALID";
+export type StepErrorCode =
+  | "NOT_YOUR_TURN"
+  | "ROOM_NOT_PLAYING"
+  | "UNKNOWN_PLAYER"
+  | "NOT_AUTHENTICATED"
+  | "RATE_LIMITED"
+  | "DUPLICATE_STEP"
+  | "INVALID_PAYLOAD";
+
+export type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
 
 export type GameOverReason = "all-finished" | "all-eliminated" | "time-limit" | "host-ended";
 
@@ -64,31 +77,44 @@ export type StepResultMsg =
 
 // ---------- Client -> Server（皆用 ack 回覆） ----------
 
-export interface HostCreateRoomPayload {
-  hostId: HostId;
-}
-export type HostCreateRoomAck = { ok: true; roomCode: RoomCode; snapshot: RoomStateSnapshot } | { ok: false; error: string };
+export type HostCreateRoomPayload = Record<string, never>;
+export type HostCreateRoomAck =
+  | { ok: true; roomCode: RoomCode; hostSessionToken: string; snapshot: RoomStateSnapshot }
+  | { ok: false; error: string };
 
-export interface HostRoomActionPayload {
+export interface HostResumeRoomPayload {
   roomCode: RoomCode;
-  hostId: HostId;
+  sessionToken: string;
 }
+export type HostResumeRoomAck =
+  | { ok: true; roomCode: RoomCode; sessionToken: string; snapshot: RoomStateSnapshot }
+  | { ok: false; error: ResumeErrorCode };
+
+export type HostRoomActionPayload = Record<string, never>;
 export type HostRoomActionAck = { ok: true } | { ok: false; error: string };
 
-export interface HostUpdateSettingsPayload extends HostRoomActionPayload {
+export interface HostUpdateSettingsPayload {
   settings: RoomSettings;
 }
 
 export interface PlayerJoinRoomPayload {
   roomCode: RoomCode;
-  playerId: PlayerId;
   name: string;
 }
-export type PlayerJoinRoomAck = { ok: true; snapshot: RoomStateSnapshot } | { ok: false; error: JoinErrorCode };
+export type PlayerJoinRoomAck =
+  | { ok: true; playerId: PlayerId; playerSessionToken: string; snapshot: RoomStateSnapshot }
+  | { ok: false; error: JoinErrorCode };
 
-export interface PlayerStepPayload {
+export interface PlayerResumeRoomPayload {
   roomCode: RoomCode;
   playerId: PlayerId;
+  sessionToken: string;
+}
+export type PlayerResumeRoomAck =
+  | { ok: true; playerId: PlayerId; playerSessionToken: string; snapshot: RoomStateSnapshot }
+  | { ok: false; error: ResumeErrorCode };
+
+export interface PlayerStepPayload {
   foot: Foot;
   clientSeq: number;
 }
@@ -135,6 +161,7 @@ export interface RoomPlayerBoostChangedPayload {
 /** Socket.IO 事件名稱常數，前後端都從這裡引用，避免字串打錯字造成訊息對不上。 */
 export const SOCKET_EVENTS = {
   hostCreateRoom: "host:createRoom",
+  hostResumeRoom: "host:resumeRoom",
   hostStartGame: "host:startGame",
   hostPauseGame: "host:pauseGame",
   hostResumeGame: "host:resumeGame",
@@ -142,6 +169,7 @@ export const SOCKET_EVENTS = {
   hostRestartGame: "host:restartGame",
   hostUpdateSettings: "host:updateSettings",
   playerJoinRoom: "player:joinRoom",
+  playerResumeRoom: "player:resumeRoom",
   playerStep: "player:step",
 
   roomState: "room:state",

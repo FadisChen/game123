@@ -1,7 +1,11 @@
 import "./style.css";
 import "./game/game-ui.css";
 import { JoinScreen } from "./ui/JoinScreen";
-import { getPersistentPlayerId, SocketClient } from "./net/SocketClient";
+import {
+  clearPlayerSession,
+  getStoredPlayerSession,
+  SocketClient,
+} from "./net/SocketClient";
 import { NetworkedGameController } from "./game/NetworkedGameController";
 import type { JoinErrorCode } from "shared";
 import { installLandscapeGuard, requestLandscape } from "./ui/LandscapeGuard";
@@ -18,6 +22,12 @@ function joinErrorMessage(error: JoinErrorCode): string {
       return "遊戲已經開始，無法再加入";
     case "ROOM_FULL":
       return "房間人數已滿";
+    case "RATE_LIMITED":
+      return "操作太頻繁，請稍後再試";
+    case "SESSION_INVALID":
+      return "遊戲服務已重新啟動，請重新掃描 QR Code";
+    case "INVALID_PAYLOAD":
+      return "加入資料無效，請重新操作";
   }
 }
 
@@ -42,14 +52,13 @@ if (new URLSearchParams(location.search).has("offline")) {
   });
 } else {
   const initialRoomCode = parseRoomCodeFromLocation();
-  const playerId = getPersistentPlayerId();
 
   const joinScreen = new JoinScreen(app, initialRoomCode, (roomCode, name) => {
     void requestLandscape();
     joinScreen.setBusy(true);
     const socketClient = new SocketClient();
     void socketClient
-      .joinRoom({ roomCode, playerId, name })
+      .joinRoom({ roomCode, name })
       .then((ack) => {
         if (!ack.ok) {
           joinScreen.setBusy(false);
@@ -57,8 +66,15 @@ if (new URLSearchParams(location.search).has("offline")) {
           socketClient.disconnect();
           return;
         }
+        socketClient.setPlayerSession({
+          roomCode,
+          playerId: ack.playerId,
+          sessionToken: ack.playerSessionToken,
+          name,
+          nextClientSeq: 0,
+        });
         joinScreen.remove();
-        new NetworkedGameController(app, socketClient, roomCode, playerId, name, ack.snapshot);
+        new NetworkedGameController(app, socketClient, roomCode, ack.playerId, name, ack.snapshot);
       })
       .catch(() => {
         joinScreen.setBusy(false);
@@ -66,4 +82,37 @@ if (new URLSearchParams(location.search).has("offline")) {
         socketClient.disconnect();
       });
   });
+
+  const storedSession = getStoredPlayerSession(initialRoomCode || undefined);
+  if (storedSession && initialRoomCode) {
+    const socketClient = new SocketClient();
+    socketClient.setPlayerSession(storedSession);
+    joinScreen.setBusy(true);
+    void socketClient
+      .resumePlayerRoom()
+      .then((ack) => {
+        if (!ack.ok) {
+          clearPlayerSession();
+          joinScreen.setBusy(false);
+          joinScreen.showError("遊戲服務已重新啟動，請重新掃描 QR Code");
+          socketClient.disconnect();
+          return;
+        }
+        socketClient.setPlayerSession({ ...storedSession, sessionToken: ack.playerSessionToken });
+        joinScreen.remove();
+        new NetworkedGameController(
+          app,
+          socketClient,
+          ack.snapshot.roomCode,
+          ack.playerId,
+          storedSession.name,
+          ack.snapshot,
+        );
+      })
+      .catch(() => {
+        joinScreen.setBusy(false);
+        joinScreen.showError("連線失敗，請稍後再試");
+        socketClient.disconnect();
+      });
+  }
 }

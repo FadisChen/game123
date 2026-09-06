@@ -9,7 +9,6 @@
  *   LOAD_TEST_PLAYERS=150 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs
  */
 import { io } from "socket.io-client";
-import crypto from "node:crypto";
 
 const SERVER_URL = process.env.LOAD_TEST_SERVER_URL ?? "http://localhost:3001";
 const PLAYER_COUNT = Number(process.env.LOAD_TEST_PLAYERS ?? 100);
@@ -27,7 +26,7 @@ function emitAck(socket, event, payload) {
 
 function connect(url) {
   return new Promise((resolve, reject) => {
-    const socket = io(url, { transports: ["websocket"] });
+    const socket = io(url);
     socket.once("connect", () => resolve(socket));
     socket.once("connect_error", reject);
   });
@@ -56,8 +55,7 @@ async function main() {
   console.log(`連線到 ${SERVER_URL}，模擬 1 位主辦方 + ${PLAYER_COUNT} 位玩家`);
 
   const host = await connect(SERVER_URL);
-  const hostId = crypto.randomUUID();
-  const createAck = await emitAck(host, "host:createRoom", { hostId });
+  const createAck = await emitAck(host, "host:createRoom", {});
   if (!createAck.ok) throw new Error("建立房間失敗");
   const roomCode = createAck.roomCode;
   console.log("房間代碼:", roomCode);
@@ -67,16 +65,15 @@ async function main() {
   const joinStart = Date.now();
   for (let i = 0; i < PLAYER_COUNT; i++) {
     const socket = await connect(SERVER_URL);
-    const playerId = crypto.randomUUID();
     const t0 = performance.now();
-    const ack = await emitAck(socket, "player:joinRoom", { roomCode, playerId, name: `P${i}` });
+    const ack = await emitAck(socket, "player:joinRoom", { roomCode, name: `P${i}` });
     joinLatencies.push(performance.now() - t0);
     if (!ack.ok) {
       console.error(`玩家 ${i} 加入失敗:`, ack.error);
       socket.disconnect();
       continue;
     }
-    players.push({ socket, playerId, stepLatencies: [] });
+    players.push({ socket, playerId: ack.playerId, sessionToken: ack.playerSessionToken, stepLatencies: [] });
   }
   console.log(`${players.length}/${PLAYER_COUNT} 位玩家加入完成，耗時 ${Date.now() - joinStart}ms`);
   printStats("加入房間 ack 延遲", joinLatencies);
@@ -85,19 +82,17 @@ async function main() {
   {
     const overflow = await connect(SERVER_URL);
     const ack = await emitAck(overflow, "player:joinRoom", {
-      roomCode,
-      playerId: crypto.randomUUID(),
       name: "Overflow",
     });
     console.log("超額玩家加入結果（房間未滿時應為 ok:true，已滿時應為 ROOM_FULL）:", ack.ok ? "ok" : ack.error);
     overflow.disconnect();
-    if (ack.ok) players.push({ socket: overflow, playerId: ack.snapshot.players.at(-1).playerId, stepLatencies: [] });
+    if (ack.ok) players.push({ socket: overflow, playerId: ack.playerId, sessionToken: ack.playerSessionToken, stepLatencies: [] });
   }
 
   const ghostStateTimestamps = [];
   host.on("ghost:stateChanged", () => ghostStateTimestamps.push(Date.now()));
 
-  const startAck = await emitAck(host, "host:startGame", { roomCode, hostId });
+  const startAck = await emitAck(host, "host:startGame", {});
   console.log("開始遊戲 ack:", startAck);
 
   await sleep(250); // startGame 後直接進入 PLAYING
@@ -123,7 +118,7 @@ async function main() {
     while (Date.now() < playEnd) {
       const t0 = performance.now();
       pendingBroadcastAt.set(p.playerId, t0);
-      await emitAck(p.socket, "player:step", { roomCode, playerId: p.playerId, foot, clientSeq: clientSeq++ });
+      await emitAck(p.socket, "player:step", { foot, clientSeq: clientSeq++ });
       p.stepLatencies.push(performance.now() - t0);
       foot = foot === "left" ? "right" : "left";
       await sleep(STEP_MIN_INTERVAL_MS + Math.random() * (STEP_MAX_INTERVAL_MS - STEP_MIN_INTERVAL_MS));
@@ -137,7 +132,7 @@ async function main() {
   );
   printStats("room:playerStepped 廣播到主控台的延遲", broadcastLatencies);
 
-  await emitAck(host, "host:endGame", { roomCode, hostId });
+  await emitAck(host, "host:endGame", {});
 
   for (const p of players) p.socket.disconnect();
   host.disconnect();

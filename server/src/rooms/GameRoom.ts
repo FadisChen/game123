@@ -1,10 +1,12 @@
 import {
   DEFAULT_ROOM_SETTINGS,
   GhostAI,
+  MAX_STEP_EVENTS_PER_WINDOW,
   MAX_GAME_DURATION_MS,
   MAX_PLAYERS_PER_ROOM,
   Player,
   RECONNECT_GRACE_MS,
+  STEP_RATE_LIMIT_WINDOW_MS,
   SPEED_BOOST_CHECK_INTERVAL_MS,
   SPEED_BOOST_DURATION_MS,
   SPEED_BOOST_MULTIPLIER,
@@ -22,9 +24,15 @@ import {
   type StepErrorCode,
   type StepResultMsg,
 } from "shared";
+import { randomBytes } from "node:crypto";
+
+function createSessionToken(): string {
+  return randomBytes(32).toString("base64url");
+}
 
 export interface ServerPlayerState {
   playerId: string;
+  sessionToken: string;
   name: string;
   player: Player;
   socketId: string | null;
@@ -37,6 +45,10 @@ export interface ServerPlayerState {
   /** 隨機加速排程（PRD 22.2）：下次檢定時間、以及目前加速視窗的到期時間（null＝未加速）。 */
   nextBoostRollAt: number;
   boostActiveUntil: number | null;
+  lastClientSeq: number;
+  lastStepResult: { clientSeq: number; result: StepResultMsg } | null;
+  stepWindowStartedAt: number;
+  stepEventsInWindow: number;
 }
 
 export type RoomEvent =
@@ -64,6 +76,7 @@ function toStepResultMsg(
 export class GameRoom {
   readonly code: string;
   readonly hostId: string;
+  private readonly hostSessionToken = createSessionToken();
   hostSocketId: string | null = null;
 
   phase: RoomPhase = "WAITING";
@@ -108,6 +121,7 @@ export class GameRoom {
   join(playerId: string, name: string): { ok: true } | { ok: false; error: JoinErrorCode } {
     const existing = this.players.get(playerId);
     if (existing) {
+      if (existing.disconnectedPermanently) return { ok: false, error: "SESSION_INVALID" };
       existing.connected = true;
       existing.disconnectedAt = null;
       existing.disconnectedPermanently = false;
@@ -137,6 +151,7 @@ export class GameRoom {
     );
     this.players.set(playerId, {
       playerId,
+      sessionToken: createSessionToken(),
       name: trimmed,
       player,
       socketId: null,
@@ -146,29 +161,70 @@ export class GameRoom {
       joinOrder: this.nextJoinOrder++,
       nextBoostRollAt: Infinity,
       boostActiveUntil: null,
+      lastClientSeq: -1,
+      lastStepResult: null,
+      stepWindowStartedAt: 0,
+      stepEventsInWindow: 0,
     });
+    return { ok: true };
+  }
+
+  getHostSessionToken(): string {
+    return this.hostSessionToken;
+  }
+
+  getPlayerSessionToken(playerId: string): string | undefined {
+    return this.players.get(playerId)?.sessionToken;
+  }
+
+  resumeHost(sessionToken: string, socketId: string): { ok: true } | { ok: false; error: "SESSION_INVALID" } {
+    if (sessionToken !== this.hostSessionToken) return { ok: false, error: "SESSION_INVALID" };
+    this.attachHostSocket(socketId);
+    return { ok: true };
+  }
+
+  resumePlayer(
+    playerId: string,
+    sessionToken: string,
+    socketId: string,
+  ): { ok: true } | { ok: false; error: "SESSION_INVALID" } {
+    const p = this.players.get(playerId);
+    if (!p || p.sessionToken !== sessionToken || p.disconnectedPermanently) {
+      return { ok: false, error: "SESSION_INVALID" };
+    }
+    p.connected = true;
+    p.disconnectedAt = null;
+    p.socketId = socketId;
     return { ok: true };
   }
 
   attachSocket(playerId: string, socketId: string): void {
     const p = this.players.get(playerId);
-    if (p) p.socketId = socketId;
+    if (p) {
+      p.socketId = socketId;
+      p.connected = true;
+      p.disconnectedAt = null;
+    }
   }
 
   attachHostSocket(socketId: string): void {
     this.hostSocketId = socketId;
   }
 
-  markPlayerDisconnected(playerId: string, now: number): void {
+  markPlayerDisconnected(playerId: string, now: number, socketId?: string): boolean {
     const p = this.players.get(playerId);
-    if (!p) return;
+    if (!p) return false;
+    if (socketId !== undefined && p.socketId !== socketId) return false;
     p.connected = false;
     p.socketId = null;
     p.disconnectedAt = now;
+    return true;
   }
 
-  markHostDisconnected(): void {
+  markHostDisconnected(socketId?: string): boolean {
+    if (socketId !== undefined && this.hostSocketId !== socketId) return false;
     this.hostSocketId = null;
+    return true;
   }
 
   startGame(now: number): { ok: true } | { ok: false; error: string } {
@@ -220,6 +276,10 @@ export class GameRoom {
       p.finishedAtMs = undefined;
       p.nextBoostRollAt = Infinity;
       p.boostActiveUntil = null;
+      p.lastClientSeq = -1;
+      p.lastStepResult = null;
+      p.stepWindowStartedAt = 0;
+      p.stepEventsInWindow = 0;
     }
     this.ghost = null;
     this.phase = "WAITING";
@@ -235,13 +295,40 @@ export class GameRoom {
     playerId: string,
     foot: Foot,
     now: number,
-  ): { ok: true; result: StepResultMsg; ghostChanged: boolean; concluded: GameOverReason | null } | { ok: false; error: StepErrorCode } {
-    if (this.phase !== "PLAYING" || !this.ghost) {
-      return { ok: false, error: "ROOM_NOT_PLAYING" };
-    }
+    clientSeq?: number,
+  ): { ok: true; result: StepResultMsg; ghostChanged: boolean; concluded: GameOverReason | null; duplicate?: boolean } | { ok: false; error: StepErrorCode } {
     const state = this.players.get(playerId);
     if (!state) {
       return { ok: false, error: "UNKNOWN_PLAYER" };
+    }
+    // 即使遊戲剛好在重試前結束，相同 sequence 仍回傳原結果，避免網路重送造成語意改變。
+    if (clientSeq !== undefined && state.lastStepResult?.clientSeq === clientSeq) {
+      return {
+        ok: true,
+        result: state.lastStepResult.result,
+        ghostChanged: false,
+        concluded: null,
+        duplicate: true,
+      };
+    }
+    if (this.phase !== "PLAYING" || !this.ghost) {
+      return { ok: false, error: "ROOM_NOT_PLAYING" };
+    }
+    if (!state.connected) {
+      return { ok: false, error: "NOT_AUTHENTICATED" };
+    }
+
+    if (clientSeq !== undefined) {
+      if (clientSeq <= state.lastClientSeq) return { ok: false, error: "DUPLICATE_STEP" };
+      if (now - state.stepWindowStartedAt >= STEP_RATE_LIMIT_WINDOW_MS) {
+        state.stepWindowStartedAt = now;
+        state.stepEventsInWindow = 0;
+      }
+      if (state.stepEventsInWindow >= MAX_STEP_EVENTS_PER_WINDOW) {
+        return { ok: false, error: "RATE_LIMITED" };
+      }
+      state.lastClientSeq = clientSeq;
+      state.stepEventsInWindow += 1;
     }
 
     const beforeGhostState = this.ghost.getState();
@@ -256,6 +343,7 @@ export class GameRoom {
     }
 
     const concluded = this.checkForConclusion(now);
+    if (clientSeq !== undefined) state.lastStepResult = { clientSeq, result: toStepResultMsg(result, state.finishedAtMs) };
     return { ok: true, result: toStepResultMsg(result, state.finishedAtMs), ghostChanged, concluded };
   }
 

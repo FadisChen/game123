@@ -42,7 +42,7 @@ test("host settings, player name tags and outcome effects", async ({ browser, ba
   await expect(p0.locator(".player-health")).toHaveText("♥");
 
   await hostPage.getByRole("button", { name: "開始遊戲" }).click();
-  await hostPage.waitForTimeout(500);
+  await expect(hostPage.locator(".phase-label")).toHaveText("遊戲進行中", { timeout: 15_000 });
 
   // 設定區塊開打後應該收起來。
   await expect(hostPage.getByRole("button", { name: "感應式", exact: true })).toBeHidden();

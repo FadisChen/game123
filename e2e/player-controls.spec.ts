@@ -83,6 +83,10 @@ test("player keyboard and touch share stepping rules; portrait and paused play b
     await player.keyboard.press("ArrowLeft");
     expect(sent).toHaveLength(5);
     expect(errors).toEqual([]);
+
+    await host.getByRole("button", { name: "結束遊戲" }).click();
+    await expect(player.getByText("等待主辦方重新開始")).toBeVisible();
+    await expect(player.getByRole("button", { name: "等待主辦方重新開始" })).toHaveCount(0);
   } finally {
     await hostContext.close();
     await playerContext.close();
