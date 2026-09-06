@@ -110,18 +110,11 @@ test("host camera modes switch correctly and keep the 3D scene alive", async ({ 
   const p0Id = await readPersistentPlayerId(p0);
   const p1Id = await readPersistentPlayerId(p1);
 
-  // 難度選「簡單」把鬼的安全視窗拉到最長（DIFFICULTY_PROFILES.easy.ghostLookAwayMinMs），
-  // 後面的踩腳才有足夠的餘裕在鬼回頭之前跑完；順便涵蓋了主辦方設定會實際套用到房間這條路徑。
-  const easyButton = hostPage.getByRole("button", { name: "簡單", exact: true });
-  await easyButton.click();
-  await expect(easyButton).toHaveAttribute("aria-pressed", "true");
-
   await hostPage.locator("button", { hasText: "開始遊戲" }).click();
-  await hostPage.waitForTimeout(3600); // 倒數固定 3.5 秒左右走完，進入 PLAYING
+  await hostPage.waitForTimeout(250); // 開始後直接進入 PLAYING；音樂播放期約 4.8 秒
 
   // 只讓 p0 前進，製造出領先/落後的明顯距離差，這樣「領先者/落後者」模式才有意義可以驗證。
-  // 踩腳全部塞在鬼進入 PLAYING 後保證不回頭的那段視窗內（見上面選「簡單」的理由），
-  // 避免撞上鬼回頭導致玩家被淘汰、按鈕消失，測試卡死重試到逾時；間隔只比按鈕鎖定時間長一點點。
+  // 踩腳全部塞在第一輪音樂播放期內，避免撞上鬼回頭導致玩家被淘汰；間隔只比按鈕鎖定時間長一點點。
   const leftBtn = p0.locator("button", { hasText: "左腳" });
   const rightBtn = p0.locator("button", { hasText: "右腳" });
   for (let i = 0; i < 8; i++) {

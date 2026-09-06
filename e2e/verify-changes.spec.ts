@@ -23,11 +23,15 @@ test("host settings, player name tags and outcome effects", async ({ browser, ba
   await hostPage.waitForSelector("text=123 木頭人");
   const roomCode = (await hostPage.locator("[data-room-code]").getAttribute("data-room-code"))!;
 
-  // --- 主辦方設定：血量 1、難度困難 ---
+  // --- 主辦方設定：血量 1、玩家玩法可在開打前切換 ---
   await hostPage.getByRole("button", { name: "1", exact: true }).click();
   await expect(hostPage.getByRole("button", { name: "1", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await hostPage.getByRole("button", { name: "困難", exact: true }).click();
-  await expect(hostPage.getByRole("button", { name: "困難", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const motionMode = hostPage.getByRole("button", { name: "感應式", exact: true });
+  await motionMode.click();
+  await expect(motionMode).toHaveAttribute("aria-pressed", "true");
+  const mainMode = hostPage.getByRole("button", { name: "主視角", exact: true });
+  await mainMode.click();
+  await expect(mainMode).toHaveAttribute("aria-pressed", "true");
 
   const p0 = await joinPlayer(await browser.newContext(), baseURL!, roomCode, "阿明");
   const p1 = await joinPlayer(await browser.newContext(), baseURL!, roomCode, "小華");
@@ -38,10 +42,10 @@ test("host settings, player name tags and outcome effects", async ({ browser, ba
   await expect(p0.locator(".player-health")).toHaveText("♥");
 
   await hostPage.getByRole("button", { name: "開始遊戲" }).click();
-  await hostPage.waitForTimeout(4000);
+  await hostPage.waitForTimeout(500);
 
   // 設定區塊開打後應該收起來。
-  await expect(hostPage.getByRole("button", { name: "困難", exact: true })).toBeHidden();
+  await expect(hostPage.getByRole("button", { name: "感應式", exact: true })).toBeHidden();
 
   await p0.locator("canvas").screenshot({ path: "test-results/verify-player-names.png" });
   await hostPage.locator("canvas").screenshot({ path: "test-results/verify-host-labels.png" });
@@ -51,7 +55,7 @@ test("host settings, player name tags and outcome effects", async ({ browser, ba
   expect(labels.join(" ")).not.toContain("❤️");
   expect(labels.join(" ")).toContain("阿明");
 
-  // --- 一路踩到被抓：血量 1 + 困難，撞上鬼回頭就立刻出局 ---
+  // --- 一路踩到被抓：血量 1，撞上鬼回頭就立刻出局 ---
   // 用鍵盤而不是點按鈕：按鈕在玩家出局的瞬間會消失，click 會卡在 actionability 等待上。
   for (let i = 0; i < 60; i++) {
     if (await p0.locator('.outcome-overlay[data-outcome="eliminated"]').isVisible()) break;
@@ -80,8 +84,6 @@ test("other players' name tags are readable from the first-person view", async (
   await hostPage.goto("/host.html");
   await hostPage.waitForSelector("text=123 木頭人");
   const roomCode = (await hostPage.locator("[data-room-code]").getAttribute("data-room-code"))!;
-  await hostPage.getByRole("button", { name: "簡單", exact: true }).click();
-
   // 四位玩家把車道間距壓到 6.3m（兩人時是 19m，彼此剛好落在對方視野外），
   // 再讓 p1 往前跑一段，p0 的第一人稱視角才看得到他頭上的名牌。
   const players = [];
@@ -92,7 +94,7 @@ test("other players' name tags are readable from the first-person view", async (
   p0.on("pageerror", (e) => errors.push(`[p0] ${e.message}`));
 
   await hostPage.getByRole("button", { name: "開始遊戲" }).click();
-  await hostPage.waitForTimeout(4000);
+  await hostPage.waitForTimeout(250);
 
   for (let i = 0; i < 25; i++) {
     await p1.keyboard.press(i % 2 === 0 ? "ArrowLeft" : "ArrowRight");

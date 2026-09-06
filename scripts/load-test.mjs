@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 壓力測試腳本：模擬一個主辦方 + 多名玩家（預設到 MAX_PLAYERS_PER_ROOM 上限）同時連進同一個房間，
- * 走完開始遊戲→倒數→PLAYING 階段並持續踩腳，量測加入延遲、player:step 往返延遲、
- * 主控台收到廣播的延遲，以及倒數計時的抖動（用來間接觀察伺服器單一 tick 迴圈有沒有被大量連線拖慢）。
+ * 走完開始遊戲→PLAYING 階段並持續踩腳，量測加入延遲、player:step 往返延遲、
+ * 主控台收到廣播的延遲，以及鬼狀態事件的間隔（用來間接觀察伺服器單一 tick 迴圈有沒有被大量連線拖慢）。
  *
  * 用法（先在另一個終端機用 `npm run dev -w server` 或 `npm run start -w server` 啟動伺服器）：
  *   node scripts/load-test.mjs
@@ -94,17 +94,15 @@ async function main() {
     if (ack.ok) players.push({ socket: overflow, playerId: ack.snapshot.players.at(-1).playerId, stepLatencies: [] });
   }
 
-  const countdownTimestamps = [];
-  host.on("room:countdownTick", () => countdownTimestamps.push(Date.now()));
+  const ghostStateTimestamps = [];
+  host.on("ghost:stateChanged", () => ghostStateTimestamps.push(Date.now()));
 
   const startAck = await emitAck(host, "host:startGame", { roomCode, hostId });
   console.log("開始遊戲 ack:", startAck);
 
-  await sleep(6000); // 走完倒數，進入 PLAYING
+  await sleep(250); // startGame 後直接進入 PLAYING
 
-  const deltas = [];
-  for (let i = 1; i < countdownTimestamps.length; i++) deltas.push(countdownTimestamps[i] - countdownTimestamps[i - 1]);
-  console.log("倒數 tick 間隔（應接近 1000ms，偏差過大代表伺服器 tick 迴圈被塞住）:", deltas.map((d) => Math.round(d)));
+  console.log("鬼狀態事件間隔（供觀察伺服器 tick 迴圈）:", ghostStateTimestamps.map((t, i) => i === 0 ? 0 : Math.round(t - ghostStateTimestamps[i - 1])));
 
   console.log(`開始讓 ${players.length} 位玩家連續踩腳 ${PLAY_DURATION_MS}ms...`);
 

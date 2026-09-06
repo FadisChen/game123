@@ -1,4 +1,4 @@
-import { FOOT_BUTTON_LOCKOUT_MS, type Foot } from "shared";
+import { FOOT_BUTTON_LOCKOUT_MS, type Foot, type PlayerMode } from "shared";
 import { isLandscape } from "./LandscapeGuard";
 
 function buildFootButton(side: Foot): HTMLButtonElement {
@@ -6,7 +6,7 @@ function buildFootButton(side: Foot): HTMLButtonElement {
   button.className = `foot-button foot-button--${side}`;
   button.type = "button";
   button.innerHTML = `<span class="foot-arrow" aria-hidden="true">${side === "left" ? "←" : "→"}</span>
-    <span>${side === "left" ? "左腳" : "右腳"}</span><kbd>${side === "left" ? "←" : "→"}</kbd>`;
+    <span>${side === "left" ? "左腳" : "右腳"}</span>`;
   return button;
 }
 
@@ -17,16 +17,18 @@ export class Controls {
   private readonly rightButton: HTMLButtonElement;
   private lockedUntil = 0;
   private visible = true;
+  private mode: PlayerMode = "main";
+  private motionAvailable = false;
+  private readonly hint: HTMLDivElement;
 
   constructor(container: HTMLElement, onStep: (foot: Foot) => void) {
     this.root = document.createElement("div");
     this.root.className = "player-controls";
     this.leftButton = buildFootButton("left");
     this.rightButton = buildFootButton("right");
-    const hint = document.createElement("div");
-    hint.className = "step-hint";
-    hint.textContent = "左右交替前進 · 紅燈停下";
-    this.root.append(this.leftButton, hint, this.rightButton);
+    this.hint = document.createElement("div");
+    this.hint.className = "step-hint";
+    this.root.append(this.leftButton, this.hint, this.rightButton);
     container.appendChild(this.root);
 
     const press = (foot: Foot) => {
@@ -47,6 +49,7 @@ export class Controls {
         if (event.detail === 0) press(foot);
       });
     }
+    this.updateModeUi();
     window.addEventListener("keydown", (event) => {
       if (!this.visible || !isLandscape() || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]")) return;
@@ -65,5 +68,26 @@ export class Controls {
   setVisible(visible: boolean): void {
     this.visible = visible;
     this.root.hidden = !visible;
+  }
+
+  setMode(mode: PlayerMode): void {
+    this.mode = mode;
+    this.updateModeUi();
+  }
+
+  setMotionAvailable(available: boolean): void {
+    this.motionAvailable = available;
+    this.updateModeUi();
+  }
+
+  private updateModeUi(): void {
+    const motionActive = this.mode === "motion" && this.motionAvailable;
+    this.root.dataset.inputMode = this.mode;
+    this.root.dataset.motionAvailable = String(this.motionAvailable);
+    this.leftButton.hidden = motionActive;
+    this.rightButton.hidden = motionActive;
+    this.hint.textContent = this.mode === "motion"
+      ? motionActive ? "上下晃動，一次前進一步" : "感應不可用 · 點按左右腳備援"
+      : "左右交替前進 · 音樂播放時移動";
   }
 }

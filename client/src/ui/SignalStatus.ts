@@ -1,28 +1,25 @@
 import type { GhostState, RoomPhase } from "shared";
 
-/** 兩端共用燈號與時間格式，轉頭期間顯示警示。 */
-export class SignalStatus {
+/** 兩端共用的文字狀態；音樂節奏取代紅綠燈與數字倒數成為玩家提示。 */
+export class GameStatus {
   readonly root = document.createElement("div");
   private readonly label = document.createElement("strong");
-  private readonly timer = document.createElement("span");
 
   constructor() {
-    this.root.className = "signal-status";
-    const lamp = document.createElement("span");
-    lamp.className = "signal-lamp";
-    lamp.setAttribute("aria-hidden", "true");
+    this.root.className = "game-status";
+    const mark = document.createElement("span");
+    mark.className = "status-wave";
+    mark.setAttribute("aria-hidden", "true");
+    mark.innerHTML = "<i></i><i></i><i></i>";
     const text = document.createElement("div");
     this.label.className = "signal-label";
-    this.timer.className = "signal-timer";
-    text.append(this.label, this.timer);
-    this.root.append(lamp, text);
+    text.append(this.label);
+    this.root.append(mark, text);
   }
 
-  update(state: GhostState, remainingMs: number, phase: RoomPhase): void {
-    const mode = phase !== "PLAYING" ? "idle" : state === "LOOKING" ? "red" : state === "LOOK_AWAY" ? "green" : "amber";
-    this.root.dataset.signal = mode;
-    this.label.textContent = phase === "PAUSED" ? "已暫停" : phase === "WAITING" ? "等待開始" : phase === "COUNTDOWN" ? "準備出發" : phase === "GAME_OVER" ? "本局結束" : mode === "red" ? "紅燈・停下" : mode === "green" ? "綠燈" : "注意轉頭";
-    const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-    this.timer.textContent = phase === "PLAYING" ? `00:${String(seconds).padStart(2, "0")}` : "— —";
+  update(state: GhostState, phase: RoomPhase): void {
+    const status = phase === "PAUSED" ? "paused" : phase === "WAITING" ? "waiting" : phase === "GAME_OVER" ? "over" : state === "LOOK_AWAY" ? "moving" : state === "LOOKING" ? "looking" : "turning";
+    this.root.dataset.status = status;
+    this.label.textContent = phase === "PAUSED" ? "已暫停" : phase === "WAITING" ? "等待開始" : phase === "GAME_OVER" ? "本局結束" : state === "LOOK_AWAY" ? "音樂播放中・可以前進" : state === "LOOKING" ? "鬼正在審視・停止移動" : "鬼轉身中";
   }
 }

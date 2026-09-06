@@ -13,7 +13,6 @@ import {
   type PlayerStepPayload,
   type PlayerSummary,
   type RoomClosedPayload,
-  type RoomCountdownTickPayload,
   type RoomGameOverPayload,
   type RoomPhaseChangedPayload,
   type RoomPlayerBoostChangedPayload,
@@ -99,9 +98,6 @@ export class SocketClient {
   }
   onPhaseChanged(cb: (payload: RoomPhaseChangedPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomPhaseChanged, cb);
-  }
-  onCountdownTick(cb: (payload: RoomCountdownTickPayload) => void): void {
-    this.socket.on(SOCKET_EVENTS.roomCountdownTick, cb);
   }
   onGhostStateChanged(cb: (payload: GhostVisualState) => void): void {
     this.socket.on(SOCKET_EVENTS.ghostStateChanged, cb);

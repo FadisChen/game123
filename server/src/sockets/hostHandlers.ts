@@ -30,8 +30,15 @@ function withHostRoom(
     ack(result);
     return;
   }
+  const snapshot = room.toSnapshot(now);
   broadcastSnapshot(io, room, now);
-  io.to(room.code).emit(SOCKET_EVENTS.roomPhaseChanged, { phase: room.phase, serverNowMs: now });
+  io.to(room.code).emit(SOCKET_EVENTS.roomPhaseChanged, {
+    phase: snapshot.phase,
+    serverNowMs: snapshot.serverNowMs,
+    roundStartedAtMs: snapshot.roundStartedAtMs,
+    roundDeadlineMs: snapshot.roundDeadlineMs,
+    settings: snapshot.settings,
+  });
   if (room.phase === "GAME_OVER") {
     // 主辦方「結束遊戲」屬於強制結算，不會經過 tick()/applyStep() 的自然結束路徑，
     // 所以這裡要自己補送 room:gameOver，否則玩家端永遠不會收到排名資料。

@@ -1,9 +1,10 @@
 # 123 木頭人（Red Light, Green Light）
 
-公司年會用的 3D「123 木頭人」多人連線小遊戲。手機當手把（踩左右腳前進），大螢幕當主辦方鳥瞰主控台，鬼會隨機回頭抓正在動的人，最先抵達終點或活到最後的人獲勝。
+公司年會用的 3D「123 木頭人」多人連線小遊戲。手機當手把（左右腳按鍵或上下晃動前進），大螢幕當主辦方鳥瞰主控台，鬼會隨音樂節奏回頭抓正在動的人，最先抵達終點或活到最後的人獲勝。
 
-- **玩家端**：手機瀏覽器掃 QR Code 加入房間，第一人稱視角，畫面上兩顆「左腳／右腳」按鈕交替點擊前進。
+- **玩家端**：手機瀏覽器掃 QR Code 加入房間，第一人稱視角；房間可選「主視角」按鍵或「感應式」上下晃動，一次晃動前進一步。感測器不可用時保留按鍵備援。
 - **主辦方端**：投影到大螢幕的鳥瞰 3D 場景＋控制面板（房號、QR Code、玩家清單、開始/暫停/結束/重新開始、排名、鏡頭模式切換）。
+- **遊戲節奏**：開始後由主辦方裝置播放 `asserts/123木頭人.mp3`；音樂播放時可前進，音樂結束後鬼轉身，隨機審視 3～6 秒，再轉回去播放下一輪。每輪速度增加 0.1x，最高 2.0x。
 - 判定完全在伺服器端做（移動距離、鬼有沒有在看、有沒有被抓、加速有沒有觸發），手機端只負責顯示與送出「我踩了左/右腳」的意圖，沒有作弊空間。
 
 ## 專案結構
@@ -23,7 +24,7 @@ game123/
 
 - `config.ts`：所有可調參數（鬼回頭時間、加速機率、房間人數上限、伺服器 tick 頻率…），前後端只有這一份，不會各自定義出不一致的數值。
 - `Player.ts`：左右腳交替規則、扣分/淘汰/抵達終點判定，**只由伺服器 instantiate**，是唯一的權威判定邏輯。
-- `GhostAI.ts`：鬼的狀態機（`LOOK_AWAY → TURNING_TO_LOOK → LOOKING → TURNING_AWAY`，加上偶爾的假動作 `FAKE_TURN`）。拆成兩個類別：
+- `GhostAI.ts`：鬼的狀態機（`LOOK_AWAY → TURNING_TO_LOOK → LOOKING → TURNING_AWAY`）。音樂輪次與播放速度由伺服器廣播，假動作已移除。拆成兩個類別：
   - `GhostAI`：伺服器端權威版，會真的推進狀態、丟骰子。
   - `GhostReplicaAI`：客戶端純顯示版，沒有亂數也沒有 `update()`，完全由伺服器廣播的 `ghost:stateChanged` 驅動，**只能拿來做視覺效果，絕對不能拿來做任何判定**。
 - `ranking.ts`：結算排名規則（抵達終點依完成順序、存活/淘汰依距離排序）。
@@ -33,7 +34,7 @@ game123/
 
 - `src/index.ts`：起 Express（順便伺服 `client/dist` 靜態檔案與 `/`、`/host`、`/join/:code` 路由）+ Socket.IO，並用**單一全域 `setInterval`**（`SERVER_TICK_MS = 100ms`）推進所有房間的狀態，而不是每個房間各自一個計時器。
 - `src/rooms/RoomManager.ts`：管理所有房間（`Map<房號, GameRoom>`），並負責回收長時間沒人連線的房間。
-- `src/rooms/GameRoom.ts`：單一房間的完整權威狀態機（`WAITING → COUNTDOWN → PLAYING → GAME_OVER`，`PLAYING` 期間可 `PAUSED`），包含鬼的推進、隨機加速、斷線寬限期、結算排名等所有邏輯。
+- `src/rooms/GameRoom.ts`：單一房間的完整權威狀態機（`WAITING → PLAYING → GAME_OVER`，`PLAYING` 期間可 `PAUSED`），包含鬼的推進、音樂輪次、隨機加速、斷線寬限期、結算排名等所有邏輯。
 - `src/sockets/`：把 Socket.IO 的具名事件（見下方協定表）接到 `GameRoom`/`RoomManager` 上，並負責把結果廣播出去。
 
 ### `client/` — 前端（Vite + TypeScript + Three.js）
@@ -44,7 +45,8 @@ game123/
 - `host.html` / `main-host.ts`：主辦方主控台。`host/HostController.ts` 統籌 `host/HostScene.ts`（鳥瞰 3D，玩家頭像用 `InstancedMesh` 一次 draw call 畫完，支援鳥瞰／跟隨領先者／跟隨落後者／自由拖曳四種鏡頭模式）與 `host/HostConsolePanel.ts`（房號、QR Code、玩家清單、控制按鈕、鏡頭模式選單、排名彈窗）。
 - `net/SocketClient.ts`：對 `socket.io-client` 的薄封裝，把所有事件名稱/型別收斂到這一份。
 - `net/ClockSync.ts`：用伺服器回報的時間戳算跟本機時間的偏移量，純顯示用，不影響判定公平性。
-- `game/audio.ts`：用 Web Audio API 即時合成的音效（沒有音檔素材）。
+- `game/audio.ts`：保留 Web Audio API 合成的短音效，並以 `MusicPlayer` 同步主辦方端的 MP3 播放、暫停、恢復與播放速度。
+- `input/MotionInput.ts`：在使用者確認教學時請求裝置感測器權限，將校正過的上下晃動轉成左右腳交替步進。
 
 ## Socket.IO 通訊協定
 
@@ -63,7 +65,7 @@ game123/
 |---|---|
 | `room:state` | 完整快照，結構性變化時送出（加入/離開/階段變化等） |
 | `room:playerJoined` / `playerLeft` | 增量更新 |
-| `room:phaseChanged` / `countdownTick` | 遊戲階段推進 |
+| `room:phaseChanged` | 遊戲階段推進，附帶本輪設定與時間資訊 |
 | `ghost:stateChanged` | 鬼的狀態真的轉換時送出（不逐幀送） |
 | `room:playerStepped` | 每次處理完一次踩腳後廣播 |
 | `room:playerBoostChanged` | 隨機加速視窗開始/結束 |
@@ -120,7 +122,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/chrome npx playwright test
 
 ### 壓力測試
 
-`scripts/load-test.mjs` 用 `socket.io-client` 模擬一個主辦方＋多名玩家同時連進同一個房間、持續踩腳，量測加入延遲、`player:step` 往返延遲、主控台收到廣播的延遲，以及倒數計時的抖動（間接觀察伺服器 tick 迴圈有沒有被大量連線拖慢）。跑之前要先啟動伺服器：
+`scripts/load-test.mjs` 用 `socket.io-client` 模擬一個主辦方＋多名玩家同時連進同一個房間、持續踩腳，量測加入延遲、`player:step` 往返延遲、主控台收到廣播的延遲，以及鬼狀態事件的間隔（間接觀察伺服器 tick 迴圈有沒有被大量連線拖慢）。跑之前要先啟動伺服器：
 
 ```bash
 npm run start -w server &
@@ -128,11 +130,10 @@ node scripts/load-test.mjs
 LOAD_TEST_PLAYERS=150 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs   # 自訂人數/時長
 ```
 
-實測：單一房間 100 位玩家（人數上限）同時連線＋連續踩腳，`player:step` 往返延遲中位數 <1ms，倒數計時幾乎零抖動；3 個房間共 300 位玩家同時運作，伺服器 CPU 峰值仍在 20% 以內。
+實測：單一房間 100 位玩家（人數上限）同時連線＋連續踩腳，`player:step` 往返延遲中位數 <1ms；3 個房間共 300 位玩家同時運作，伺服器 CPU 峰值仍在 20% 以內。
 
 ## 加分玩法
 
-- **鬼的假動作**：偶爾轉一半又轉回去，製造心理壓力但不會真的判定違規。
 - **最後衝刺**：距終點剩一小段距離時跳出提示＋畫面警示暈影。
 - **隨機加速**：每位玩家每隔一段時間有機率進入短暫加速窗口，移動速度變 1.5 倍。
 - **主辦方鏡頭模式**：鳥瞰（固定機位）／跟隨領先者／跟隨落後者／自由拖曳鏡頭，四種模式可即時切換。

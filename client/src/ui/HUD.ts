@@ -1,20 +1,17 @@
-import { CAUGHT_TOAST_MS, INITIAL_SCORE, type GhostState, type PlayerSummary, type RoomPhase } from "shared";
+import { CAUGHT_TOAST_MS, INITIAL_SCORE, type PlayerSummary } from "shared";
 import { sfx } from "../game/audio";
-import { SignalStatus } from "./SignalStatus";
 
 export type ToastVariant = "warn" | "danger" | "success" | "info";
 
 export class HUD {
   private readonly root = document.createElement("div");
   private readonly scoreEl = document.createElement("div");
-  private readonly countdownEl = document.createElement("div");
   private readonly toastEl = document.createElement("div");
   private readonly muteButton = document.createElement("button");
   private readonly sprintBannerEl = document.createElement("div");
   private readonly vignetteEl = document.createElement("div");
   private readonly playersEl = document.createElement("div");
   private readonly outcomeEl = document.createElement("div");
-  private readonly signal = new SignalStatus();
   private maxScore = INITIAL_SCORE;
   private toastTimer: number | undefined;
   private sprintBannerTimer: number | undefined;
@@ -26,8 +23,6 @@ export class HUD {
     this.muteButton.type = "button";
     this.muteButton.addEventListener("click", () => this.refreshMuteIcon(sfx.toggleMuted()));
     this.refreshMuteIcon(sfx.isMuted());
-    this.countdownEl.className = "start-countdown";
-    this.countdownEl.hidden = true;
     this.toastEl.className = "game-toast";
     this.toastEl.setAttribute("role", "status");
     this.toastEl.hidden = true;
@@ -42,7 +37,7 @@ export class HUD {
     const crosshair = document.createElement("div");
     crosshair.className = "crosshair";
     crosshair.setAttribute("aria-hidden", "true");
-    this.root.append(this.signal.root, this.scoreEl, this.playersEl, this.muteButton, crosshair, this.countdownEl, this.toastEl, this.sprintBannerEl, this.vignetteEl, this.outcomeEl);
+    this.root.append(this.scoreEl, this.playersEl, this.muteButton, crosshair, this.toastEl, this.sprintBannerEl, this.vignetteEl, this.outcomeEl);
     container.appendChild(this.root);
     this.setScore(INITIAL_SCORE);
     this.setPlayerCount(1, 1);
@@ -54,7 +49,7 @@ export class HUD {
     this.muteButton.setAttribute("aria-pressed", String(muted));
   }
 
-  /** maxScore 決定要畫幾格愛心；主辦方可以每場調整（1~3），省略時沿用預設難度的血量。 */
+  /** maxScore 決定要畫幾格愛心；主辦方可以每場調整（1~3）。 */
   setScore(score: number, maxScore = this.maxScore): void {
     this.maxScore = maxScore;
     this.scoreEl.textContent = Array.from({ length: maxScore }, (_, i) => i < score ? "♥" : "♡").join(" ");
@@ -83,17 +78,6 @@ export class HUD {
   setPlayerCount(alive: number, total: number): void {
     this.playersEl.innerHTML = `<span>存活玩家</span><div><strong>${alive}</strong><span> / ${total}</span></div>`;
   }
-
-  setSignal(state: GhostState, remainingMs: number, phase: RoomPhase): void {
-    this.signal.update(state, remainingMs, phase);
-  }
-
-  showCountdown(text: string): void {
-    this.countdownEl.textContent = text;
-    this.countdownEl.hidden = false;
-  }
-
-  hideCountdown(): void { this.countdownEl.hidden = true; }
 
   showToast(message: string, variant: ToastVariant): void {
     this.toastEl.dataset.variant = variant;

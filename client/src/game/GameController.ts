@@ -1,5 +1,4 @@
 import {
-  COUNTDOWN_SECONDS,
   FINAL_SPRINT_REMAINING_M,
   FINISH_DISTANCE_M,
   STEP_TWEEN_MS,
@@ -7,20 +6,22 @@ import {
   Player,
   type Foot,
   type GhostState,
+  type GhostVisualState,
 } from "shared";
 import { HUD } from "../ui/HUD";
 import { TeachingScreen } from "../ui/TeachingScreen";
 import { GameOverScreen, type GameOutcome } from "../ui/GameOverScreen";
 import { Controls } from "../ui/Controls";
 import { GameScene } from "./Scene";
-import { sfx } from "./audio";
+import { MusicPlayer, sfx } from "./audio";
 
-type GameState = "TEACHING" | "COUNTDOWN" | "PLAYING" | "GAME_OVER";
+type GameState = "TEACHING" | "PLAYING" | "GAME_OVER";
 
 /**
  * Phase 1 的單機本機版控制器，Phase 2 加入連線後保留給 `?offline=1` 開發旗標使用
  * （純調美術/音效時不需要開伺服器）。正式的多人流程見 NetworkedGameController。
- * 遊戲狀態機：TEACHING -> COUNTDOWN -> PLAYING -> GAME_OVER（對應 PRD 第 10 章，精簡房間相關狀態）。
+ * 遊戲狀態機：TEACHING -> PLAYING -> GAME_OVER；音樂輪次由本機 GhostAI 驅動，
+ * 方便不連線時直接調整遊戲節奏。
  */
 export class GameController {
   private readonly scene: GameScene;
@@ -28,12 +29,12 @@ export class GameController {
   private readonly teaching: TeachingScreen;
   private readonly gameOver: GameOverScreen;
   private readonly controls: Controls;
+  private readonly musicRetryButton = document.createElement("button");
+  private readonly music = new MusicPlayer(() => { this.musicRetryButton.hidden = false; });
 
   private state: GameState = "TEACHING";
   private ghost: GhostAI;
   private player: Player;
-  private countdownValue = COUNTDOWN_SECONDS;
-  private countdownIntervalId: number | undefined;
   private previousGhostState: GhostState | null = null;
   private finalSprintTriggered = false;
 
@@ -41,8 +42,17 @@ export class GameController {
     this.scene = new GameScene(container);
     this.hud = new HUD(container);
     this.controls = new Controls(container, (foot) => this.handleStep(foot));
-    this.teaching = new TeachingScreen(container, () => this.startCountdown());
+    this.teaching = new TeachingScreen(container, () => this.startPlaying());
     this.gameOver = new GameOverScreen(container, () => this.restart());
+    this.musicRetryButton.type = "button";
+    this.musicRetryButton.className = "music-retry-button player-music-retry";
+    this.musicRetryButton.textContent = "音樂播放失敗 · 點此重試";
+    this.musicRetryButton.hidden = true;
+    this.musicRetryButton.addEventListener("click", () => {
+      this.music.retry();
+      this.musicRetryButton.hidden = true;
+    });
+    container.appendChild(this.musicRetryButton);
 
     this.ghost = new GhostAI(performance.now());
     this.player = new Player(this.ghost);
@@ -53,6 +63,8 @@ export class GameController {
 
   private enterTeaching(): void {
     this.state = "TEACHING";
+    this.music.stop();
+    this.musicRetryButton.hidden = true;
     this.hud.setVisible(false);
     this.hud.resetFinalSprint();
     this.controls.setVisible(false);
@@ -61,32 +73,12 @@ export class GameController {
     this.scene.setCameraDistanceImmediate(0);
   }
 
-  private startCountdown(): void {
-    this.teaching.setVisible(false);
-    this.state = "COUNTDOWN";
-    this.hud.setVisible(true);
-    this.countdownValue = COUNTDOWN_SECONDS;
-    this.hud.showCountdown(String(this.countdownValue));
-    sfx.play("countdown");
-
-    this.countdownIntervalId = window.setInterval(() => {
-      this.countdownValue -= 1;
-      if (this.countdownValue > 0) {
-        this.hud.showCountdown(String(this.countdownValue));
-        sfx.play("countdown");
-        return;
-      }
-      this.hud.showCountdown("GO!");
-      sfx.play("go");
-      window.clearInterval(this.countdownIntervalId);
-      window.setTimeout(() => this.startPlaying(), 500);
-    }, 1000);
-  }
-
   private startPlaying(): void {
-    this.hud.hideCountdown();
-    this.hud.resetFinalSprint();
+    this.music.primeFromGesture();
+    this.teaching.setVisible(false);
     this.state = "PLAYING";
+    this.hud.setVisible(true);
+    this.hud.resetFinalSprint();
     this.controls.setVisible(true);
 
     this.ghost = new GhostAI(performance.now());
@@ -140,6 +132,7 @@ export class GameController {
 
   private endGame(outcome: GameOutcome): void {
     this.state = "GAME_OVER";
+    this.music.stop();
     this.controls.setVisible(false);
     this.gameOver.showResult(outcome);
   }
@@ -149,22 +142,32 @@ export class GameController {
   }
 
   private loop(now: number): void {
-    this.hud.setSignal(this.ghost.getState(), this.ghost.getStateDuration() - (now - this.ghost.getStateStartedAt()), this.state === "TEACHING" ? "WAITING" : this.state);
     this.hud.setPlayerCount(this.player.score > 0 ? 1 : 0, 1);
     if (this.state === "PLAYING") {
       this.ghost.update(now);
       const currentGhostState = this.ghost.getState();
       if (
         this.previousGhostState !== currentGhostState &&
-        (currentGhostState === "TURNING_TO_LOOK" || currentGhostState === "FAKE_TURN")
+        (currentGhostState === "TURNING_TO_LOOK" || currentGhostState === "TURNING_AWAY")
       ) {
         sfx.play("ghostTurn");
       }
       this.previousGhostState = currentGhostState;
+      this.music.sync(this.toGhostVisualState(), "PLAYING", now);
       this.scene.updateGhostVisual(this.ghost.getFacingPlayerAmount(now), this.ghost.isLooking());
     }
     this.scene.updateAnimations(now);
     this.scene.render();
     requestAnimationFrame((next) => this.loop(next));
+  }
+
+  private toGhostVisualState(): GhostVisualState {
+    return {
+      state: this.ghost.getState(),
+      stateStartedAtMs: this.ghost.getStateStartedAt(),
+      stateDurationMs: this.ghost.getStateDuration(),
+      musicCycle: this.ghost.getMusicCycle(),
+      musicPlaybackRate: this.ghost.getMusicPlaybackRate(),
+    };
   }
 }

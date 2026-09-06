@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from "vite";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -32,6 +33,8 @@ export default defineConfig({
     },
   },
   server: {
+    // 音樂檔位於 monorepo 根目錄的 asserts/，開發伺服器也需要允許 Vite 讀取它。
+    fs: { allow: [path.resolve(__dirname, "..")] },
     proxy: {
       "/socket.io": {
         target: "http://localhost:3001",

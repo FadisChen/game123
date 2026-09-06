@@ -32,6 +32,8 @@ test("player keyboard and touch share stepping rules; portrait and paused play b
     expect(sent).toHaveLength(0);
     await host.getByRole("button", { name: "開始遊戲" }).click();
     await expect(player.locator(".player-controls")).toBeVisible();
+    await expect(player.locator(".player-hud .game-status")).toHaveCount(0);
+    await expect(player.locator(".start-countdown")).toHaveCount(0);
     await player.keyboard.press("ArrowLeft");
     await expect.poll(() => results.length).toBe(1);
     expect(results[0]).toBe("advanced");
@@ -67,7 +69,7 @@ test("player keyboard and touch share stepping rules; portrait and paused play b
     await player.keyboard.press("ArrowLeft");
     await player.waitForTimeout(160);
     expect(sent).toHaveLength(5);
-    await expect(player.locator(".signal-label")).toHaveText("已暫停");
+    await expect(player.locator(".player-hud .game-status")).toHaveCount(0);
     await host.getByRole("button", { name: "繼續遊戲" }).click();
     await expect(player.locator(".player-controls")).toBeVisible();
 
@@ -101,8 +103,9 @@ test("offline player also requires landscape and accepts arrow keys", async ({ p
   await page.setViewportSize({ width: 844, height: 390 });
   await page.getByRole("button", { name: "我知道了" }).click();
   await expect(page.locator(".player-controls")).toBeVisible();
-  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.down("ArrowLeft");
   await expect(page.locator(".foot-button--left")).toHaveClass(/is-pressed/);
+  await page.keyboard.up("ArrowLeft");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".landscape-guard")).toBeVisible();
   expect(errors).toEqual([]);

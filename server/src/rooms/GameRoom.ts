@@ -1,7 +1,5 @@
 import {
-  COUNTDOWN_SECONDS,
   DEFAULT_ROOM_SETTINGS,
-  DIFFICULTY_PROFILES,
   GhostAI,
   MAX_GAME_DURATION_MS,
   MAX_PLAYERS_PER_ROOM,
@@ -10,8 +8,9 @@ import {
   SPEED_BOOST_CHECK_INTERVAL_MS,
   SPEED_BOOST_DURATION_MS,
   SPEED_BOOST_MULTIPLIER,
+  SPEED_BOOST_CHANCE,
+  STEP_DISTANCE_M,
   computeRanking,
-  type DifficultyProfile,
   type Foot,
   type GameOverReason,
   type JoinErrorCode,
@@ -42,7 +41,6 @@ export interface ServerPlayerState {
 
 export type RoomEvent =
   | { type: "phaseChanged" }
-  | { type: "countdownTick"; value: number | "GO" }
   | { type: "ghostStateChanged" }
   | { type: "gameOver"; reason: GameOverReason }
   | { type: "playerConnectionChanged"; playerId: string; connected: boolean; timedOut?: boolean }
@@ -59,7 +57,7 @@ function toStepResultMsg(
 }
 
 /**
- * 一個房間的完整權威狀態機：WAITING -> COUNTDOWN -> PLAYING -> GAME_OVER（可在 PLAYING 期間進入 PAUSED）。
+ * 一個房間的完整權威狀態機：WAITING -> PLAYING -> GAME_OVER（可在 PLAYING 期間進入 PAUSED）。
  * 刻意不直接碰 socket.io——所有時間都透過參數注入的 `now`，方便單元測試；
  * 實際的廣播由呼叫端（server/src/index.ts 的 tick 迴圈與 sockets/*Handlers.ts）根據回傳的 RoomEvent[] 決定怎麼發送。
  */
@@ -73,9 +71,6 @@ export class GameRoom {
   ghost: GhostAI | null = null;
   settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS };
 
-  private countdownValue: number | "GO" = COUNTDOWN_SECONDS;
-  private countdownDeadlineAt: number | null = null;
-  private pendingPlayAt: number | null = null;
   private pausedAt: number | null = null;
   private roundStartedAt: number | null = null;
   private roundDeadlineAt: number | null = null;
@@ -96,19 +91,15 @@ export class GameRoom {
     this.boostRng = boostRng;
   }
 
-  private get profile(): DifficultyProfile {
-    return DIFFICULTY_PROFILES[this.settings.difficulty];
-  }
-
   /**
-   * 主辦方調整這一場的血量／難度。只在 WAITING 階段開放：開打後才換數值會讓已經扣過血的玩家
+   * 主辦方調整這一場的血量／玩家玩法。只在 WAITING 階段開放：開打後才換數值會讓已經扣過血的玩家
    * 跟後來的判定基準不一致。套用後把已在房裡的玩家一併重設，確保所有人起始血量相同。
    */
   updateSettings(settings: RoomSettings): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "WAITING") return { ok: false, error: "ROOM_NOT_WAITING" };
     this.settings = settings;
     for (const p of this.players.values()) {
-      p.player.configure(settings.maxScore, this.profile.stepDistanceM);
+      p.player.configure(settings.maxScore, STEP_DISTANCE_M);
     }
     return { ok: true };
   }
@@ -141,7 +132,7 @@ export class GameRoom {
     const player = new Player(
       { isLooking: () => this.ghost?.isLooking() ?? false },
       this.settings.maxScore,
-      this.profile.stepDistanceM,
+      STEP_DISTANCE_M,
     );
     this.players.set(playerId, {
       playerId,
@@ -181,10 +172,7 @@ export class GameRoom {
 
   startGame(now: number): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "WAITING") return { ok: false, error: "ROOM_NOT_WAITING" };
-    this.phase = "COUNTDOWN";
-    this.countdownValue = COUNTDOWN_SECONDS;
-    this.countdownDeadlineAt = now + 1000;
-    this.pendingPlayAt = null;
+    this.beginPlaying(now);
     return { ok: true };
   }
 
@@ -209,7 +197,7 @@ export class GameRoom {
     return { ok: true };
   }
 
-  /** 主辦方「結束遊戲」：不論目前在哪個階段（COUNTDOWN/PLAYING/PAUSED）直接強制結算。 */
+  /** 主辦方「結束遊戲」：不論目前在哪個階段（PLAYING/PAUSED）直接強制結算。 */
   forceEndGame(): { ok: true } | { ok: false; error: string } {
     if (this.phase === "WAITING" || this.phase === "GAME_OVER") {
       return { ok: false, error: "ROOM_NOT_ACTIVE" };
@@ -236,9 +224,6 @@ export class GameRoom {
     this.phase = "WAITING";
     this.lastRanking = null;
     this.lastGameOverReason = null;
-    this.countdownValue = COUNTDOWN_SECONDS;
-    this.countdownDeadlineAt = null;
-    this.pendingPlayAt = null;
     this.roundStartedAt = null;
     this.roundDeadlineAt = null;
     this.pausedAt = null;
@@ -273,7 +258,7 @@ export class GameRoom {
     return { ok: true, result: toStepResultMsg(result, state.finishedAtMs), ghostChanged, concluded };
   }
 
-  /** 由外層的全域 tick 迴圈每 SERVER_TICK_MS 呼叫一次，推進倒數/鬼的狀態/斷線寬限期/時間上限。 */
+  /** 由外層的全域 tick 迴圈每 SERVER_TICK_MS 呼叫一次，推進鬼的狀態/斷線寬限期/時間上限。 */
   tick(now: number): RoomEvent[] {
     const events: RoomEvent[] = [];
 
@@ -285,27 +270,7 @@ export class GameRoom {
       }
     }
 
-    if (this.phase === "COUNTDOWN") {
-      if (this.countdownDeadlineAt !== null && now >= this.countdownDeadlineAt) {
-        if (typeof this.countdownValue === "number") {
-          this.countdownValue -= 1;
-          if (this.countdownValue > 0) {
-            events.push({ type: "countdownTick", value: this.countdownValue });
-            this.countdownDeadlineAt = now + 1000;
-          } else {
-            this.countdownValue = "GO";
-            events.push({ type: "countdownTick", value: "GO" });
-            this.countdownDeadlineAt = null;
-            this.pendingPlayAt = now + 500;
-          }
-        }
-      } else if (this.pendingPlayAt !== null && now >= this.pendingPlayAt) {
-        this.beginPlaying(now);
-        this.pendingPlayAt = null;
-        events.push({ type: "phaseChanged" });
-        events.push({ type: "ghostStateChanged" });
-      }
-    } else if (this.phase === "PLAYING" && this.ghost) {
+    if (this.phase === "PLAYING" && this.ghost) {
       const before = this.ghost.getState();
       this.ghost.update(now);
       if (this.ghost.getState() !== before) events.push({ type: "ghostStateChanged" });
@@ -331,7 +296,7 @@ export class GameRoom {
 
       if (now >= p.nextBoostRollAt) {
         p.nextBoostRollAt = now + SPEED_BOOST_CHECK_INTERVAL_MS;
-        if (p.boostActiveUntil === null && this.boostRng() < this.profile.speedBoostChance) {
+        if (p.boostActiveUntil === null && this.boostRng() < SPEED_BOOST_CHANCE) {
           p.boostActiveUntil = now + SPEED_BOOST_DURATION_MS;
           events.push({ type: "playerBoostChanged", playerId: p.playerId, boosted: true, untilMs: p.boostActiveUntil });
         }
@@ -345,7 +310,7 @@ export class GameRoom {
 
   private beginPlaying(now: number): void {
     this.phase = "PLAYING";
-    this.ghost = new GhostAI(now, this.rng, this.profile);
+    this.ghost = new GhostAI(now, this.rng);
     this.roundStartedAt = now;
     this.roundDeadlineAt = now + MAX_GAME_DURATION_MS;
     for (const p of this.players.values()) {
@@ -403,9 +368,14 @@ export class GameRoom {
         .sort((a, b) => a.joinOrder - b.joinOrder)
         .map((p) => this.toPlayerSummary(p, now)),
       ghost: this.ghost
-        ? { state: this.ghost.getState(), stateStartedAtMs: this.ghost.getStateStartedAt(), stateDurationMs: this.ghost.getStateDuration() }
+        ? {
+            state: this.ghost.getState(),
+            stateStartedAtMs: this.ghost.getStateStartedAt(),
+            stateDurationMs: this.ghost.getStateDuration(),
+            musicCycle: this.ghost.getMusicCycle(),
+            musicPlaybackRate: this.ghost.getMusicPlaybackRate(),
+          }
         : null,
-      countdownValue: this.phase === "COUNTDOWN" ? this.countdownValue : undefined,
       serverNowMs: now,
       roundStartedAtMs: this.roundStartedAt ?? undefined,
       roundDeadlineMs: this.roundDeadlineAt ?? undefined,

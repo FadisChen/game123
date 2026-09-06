@@ -1,8 +1,7 @@
-/**
- * 沒有真實音效素材，改用 Web Audio API 即時合成短音效（對應 PRD 第 14 章的音效清單）。
- * 「遊戲結束音」併入勝利／淘汰音效本身，避免結算當下連續播放兩段聲音。
- */
-export type SfxName = "countdown" | "go" | "footstep" | "ghostTurn" | "caught" | "eliminated" | "victory" | "boost";
+import type { GhostVisualState, RoomPhase } from "shared";
+
+/** 沒有音檔的短音效仍用 Web Audio API 即時合成；主要遊戲節奏由主辦方播放真實音檔。 */
+export type SfxName = "footstep" | "ghostTurn" | "caught" | "eliminated" | "victory" | "boost";
 
 const MUTE_STORAGE_KEY = "123-doll-sfx-muted";
 
@@ -112,12 +111,6 @@ class SfxEngine {
     const t0 = ctx.currentTime;
 
     switch (name) {
-      case "countdown":
-        this.tone(ctx, t0, 0.1, 880, 880, "sine", 0.25);
-        break;
-      case "go":
-        this.tone(ctx, t0, 0.28, 440, 900, "sawtooth", 0.22);
-        break;
       case "footstep":
         this.noiseBurst(ctx, t0, 0.07, 0.18, 900);
         break;
@@ -148,3 +141,82 @@ class SfxEngine {
 }
 
 export const sfx = new SfxEngine();
+
+const MUSIC_URL = new URL("../../../asserts/123木頭人.mp3", import.meta.url).href;
+
+/**
+ * 依伺服器廣播的鬼狀態同步主辦方端的音樂。音檔播放只負責呈現，真正的狀態切換與判定仍由伺服器控制。
+ */
+export class MusicPlayer {
+  readonly audio = new Audio(MUSIC_URL);
+  private readonly onBlocked?: () => void;
+  private lastCycle = -1;
+  private lastState: GhostVisualState["state"] | null = null;
+  private blocked = false;
+  private shouldBePlaying = false;
+
+  constructor(onBlocked?: () => void) {
+    this.onBlocked = onBlocked;
+    this.audio.preload = "auto";
+    this.audio.addEventListener("error", () => this.notifyBlocked());
+  }
+
+  /** 在主辦方按下「開始遊戲」的使用者手勢中預熱音檔，降低瀏覽器自動播放被擋的機率。 */
+  primeFromGesture(): void {
+    this.audio.currentTime = 0;
+    this.audio.playbackRate = 1;
+    void this.audio.play().then(() => {
+      if (this.shouldBePlaying) return;
+      this.audio.pause();
+      this.audio.currentTime = 0;
+    }).catch(() => this.notifyBlocked());
+  }
+
+  retry(): void {
+    this.blocked = false;
+    this.primeFromGesture();
+  }
+
+  sync(ghost: GhostVisualState | null, phase: RoomPhase, nowMs: number): void {
+    if (phase !== "PLAYING" || !ghost || ghost.state !== "LOOK_AWAY") {
+      this.shouldBePlaying = false;
+      this.audio.pause();
+      return;
+    }
+    this.shouldBePlaying = true;
+
+    const isNewCycle = ghost.musicCycle !== this.lastCycle || ghost.state !== this.lastState;
+    if (isNewCycle) {
+      this.lastCycle = ghost.musicCycle;
+      this.lastState = ghost.state;
+      this.audio.playbackRate = ghost.musicPlaybackRate;
+      this.audio.currentTime = this.expectedTime(ghost, nowMs);
+    } else {
+      const expected = this.expectedTime(ghost, nowMs);
+      if (Math.abs(this.audio.currentTime - expected) > 0.35) this.audio.currentTime = expected;
+    }
+
+    if (this.audio.paused) {
+      void this.audio.play().catch(() => this.notifyBlocked());
+    }
+  }
+
+  stop(): void {
+    this.shouldBePlaying = false;
+    this.audio.pause();
+    this.audio.currentTime = 0;
+    this.lastCycle = -1;
+    this.lastState = null;
+  }
+
+  private expectedTime(ghost: GhostVisualState, nowMs: number): number {
+    const seconds = Math.max(0, nowMs - ghost.stateStartedAtMs) / 1000 * ghost.musicPlaybackRate;
+    return Number.isFinite(this.audio.duration) ? Math.min(seconds, Math.max(0, this.audio.duration - 0.02)) : seconds;
+  }
+
+  private notifyBlocked(): void {
+    if (this.blocked) return;
+    this.blocked = true;
+    this.onBlocked?.();
+  }
+}

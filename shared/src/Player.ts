@@ -19,7 +19,7 @@ export interface LookingCheck {
  * （每個房間、每位玩家各一個實例），是真正的權威判定。玩家端只做型別匯入。
  *
  * maxScore／stepDistanceM 由呼叫端（GameRoom）依該房間的設定注入；兩個參數都選填，
- * 省略時就是預設難度的數值，讓單機離線版與單元測試不必知道房間設定的存在。
+ * 省略時就是共用預設值，讓單機離線版與單元測試不必知道房間設定的存在。
  */
 export class Player {
   distance = 0;

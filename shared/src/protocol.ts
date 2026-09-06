@@ -7,7 +7,7 @@ export type RoomCode = string;
 export type PlayerId = string;
 export type HostId = string;
 
-export type RoomPhase = "WAITING" | "COUNTDOWN" | "PLAYING" | "PAUSED" | "GAME_OVER";
+export type RoomPhase = "WAITING" | "PLAYING" | "PAUSED" | "GAME_OVER";
 
 export type JoinErrorCode =
   | "ROOM_NOT_FOUND"
@@ -40,6 +40,9 @@ export interface GhostVisualState {
   /** 伺服器時間戳（ms），配合 client 端 ClockSync 的 nowServerMs() 使用。 */
   stateStartedAtMs: number;
   stateDurationMs: number;
+  /** 目前音樂循環的序號與播放速度；客戶端只用來同步音檔，不能反過來驅動伺服器。 */
+  musicCycle: number;
+  musicPlaybackRate: number;
 }
 
 export interface RoomStateSnapshot {
@@ -47,11 +50,10 @@ export interface RoomStateSnapshot {
   phase: RoomPhase;
   players: PlayerSummary[];
   ghost: GhostVisualState | null;
-  countdownValue?: number | "GO";
   serverNowMs: number;
   roundStartedAtMs?: number;
   roundDeadlineMs?: number;
-  /** 主辦方為這一場設定的血量與難度；玩家端只用 maxScore 決定 HUD 上要畫幾格愛心。 */
+  /** 主辦方為這一場設定的血量與玩家玩法。 */
   settings: RoomSettings;
 }
 
@@ -99,12 +101,8 @@ export interface RoomPhaseChangedPayload {
   serverNowMs: number;
   roundStartedAtMs?: number;
   roundDeadlineMs?: number;
-  /** 主辦方為這一場設定的血量與難度；玩家端只用 maxScore 決定 HUD 上要畫幾格愛心。 */
+  /** 主辦方為這一場設定的血量與玩家玩法。 */
   settings: RoomSettings;
-}
-
-export interface RoomCountdownTickPayload {
-  value: number | "GO";
 }
 
 export interface RoomPlayerSteppedPayload {
@@ -150,7 +148,6 @@ export const SOCKET_EVENTS = {
   roomPlayerJoined: "room:playerJoined",
   roomPlayerLeft: "room:playerLeft",
   roomPhaseChanged: "room:phaseChanged",
-  roomCountdownTick: "room:countdownTick",
   ghostStateChanged: "ghost:stateChanged",
   roomPlayerStepped: "room:playerStepped",
   roomPlayerConnectionChanged: "room:playerConnectionChanged",

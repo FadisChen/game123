@@ -16,10 +16,16 @@ export function applyRoomEvents(io: Server, room: GameRoom, events: RoomEvent[],
   for (const event of events) {
     switch (event.type) {
       case "phaseChanged":
-        io.to(room.code).emit(SOCKET_EVENTS.roomPhaseChanged, { phase: room.phase, serverNowMs: now });
-        break;
-      case "countdownTick":
-        io.to(room.code).emit(SOCKET_EVENTS.roomCountdownTick, { value: event.value });
+        {
+          const snapshot = room.toSnapshot(now);
+          io.to(room.code).emit(SOCKET_EVENTS.roomPhaseChanged, {
+            phase: snapshot.phase,
+            serverNowMs: snapshot.serverNowMs,
+            roundStartedAtMs: snapshot.roundStartedAtMs,
+            roundDeadlineMs: snapshot.roundDeadlineMs,
+            settings: snapshot.settings,
+          });
+        }
         break;
       case "ghostStateChanged":
         broadcastGhostState(io, room);

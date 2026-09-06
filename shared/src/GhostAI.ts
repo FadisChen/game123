@@ -1,20 +1,19 @@
 import {
-  DEFAULT_ROOM_SETTINGS,
-  DIFFICULTY_PROFILES,
-  FAKE_TURN_PEAK,
-  fakeTurnDurationMs,
-  type DifficultyProfile,
+  GHOST_TURN_DURATION_MS,
+  MUSIC_LOOKING_MAX_MS,
+  MUSIC_LOOKING_MIN_MS,
+  musicPhaseDurationMs,
+  musicPlaybackRate,
 } from "./config";
 
-export type GhostState = "LOOK_AWAY" | "TURNING_TO_LOOK" | "LOOKING" | "TURNING_AWAY" | "FAKE_TURN";
+export type GhostState = "LOOK_AWAY" | "TURNING_TO_LOOK" | "LOOKING" | "TURNING_AWAY";
 
-function randomLookAwayDuration(rng: () => number, profile: DifficultyProfile): number {
-  return profile.ghostLookAwayMinMs + rng() * (profile.ghostLookAwayMaxMs - profile.ghostLookAwayMinMs);
+function randomLookingDuration(rng: () => number): number {
+  return MUSIC_LOOKING_MIN_MS + rng() * (MUSIC_LOOKING_MAX_MS - MUSIC_LOOKING_MIN_MS);
 }
 
 /**
- * 0 = 完全背對玩家，1 = 完全正面朝向玩家。TURNING_* 為線性內插；
- * FAKE_TURN 為先升後降的三角波，且不超過 FAKE_TURN_PEAK。
+ * 0 = 完全背對玩家，1 = 完全正面朝向玩家。TURNING_* 為線性內插。
  * 抽成獨立函式，讓伺服器權威版 GhostAI 與客戶端純顯示版 GhostReplicaAI 共用同一份數學，
  * 不會有兩邊插值算法不同步的風險。
  */
@@ -29,35 +28,27 @@ export function computeFacingAmount(state: GhostState, elapsedMs: number, durati
       return 1;
     case "TURNING_AWAY":
       return 1 - progress;
-    case "FAKE_TURN":
-      return progress < 0.5 ? (progress / 0.5) * FAKE_TURN_PEAK : (1 - (progress - 0.5) / 0.5) * FAKE_TURN_PEAK;
   }
 }
 
 /**
- * 伺服器端權威狀態機：LOOK_AWAY -> TURNING_TO_LOOK -> LOOKING -> TURNING_AWAY -> LOOK_AWAY ...
+ * 伺服器端權威狀態機：音樂播放（LOOK_AWAY）-> TURNING_TO_LOOK -> LOOKING -> TURNING_AWAY -> 音樂播放 ...
  * 只有 LOOKING 狀態會判定玩家移動違規（對應 PRD 8.1-8.3）。
- * LOOK_AWAY 結束時有機率轉入 FAKE_TURN（PRD 22.1 鬼的假動作），全程不會進入 LOOKING。
  *
- * rng 可注入（測試用固定序列），預設 Math.random；profile 由呼叫端（GameRoom）依房間難度注入，
- * 省略時就是預設難度，讓單機離線版與單元測試不必知道房間設定的存在。
+ * rng 可注入（測試用固定序列），預設 Math.random。音樂輪次由伺服器遞增，播放速度與音樂播放期
+ * 都從共用設定計算，讓主辦方端和單機端只負責呈現，不能影響判定。
  */
 export class GhostAI {
   private state: GhostState = "LOOK_AWAY";
   private stateStartedAt: number;
   private stateDuration: number;
   private readonly rng: () => number;
-  private readonly profile: DifficultyProfile;
+  private musicCycle = 0;
 
-  constructor(
-    now: number,
-    rng: () => number = Math.random,
-    profile: DifficultyProfile = DIFFICULTY_PROFILES[DEFAULT_ROOM_SETTINGS.difficulty],
-  ) {
+  constructor(now: number, rng: () => number = Math.random) {
     this.rng = rng;
-    this.profile = profile;
     this.stateStartedAt = now;
-    this.stateDuration = randomLookAwayDuration(rng, profile);
+    this.stateDuration = musicPhaseDurationMs(this.musicCycle);
   }
 
   update(now: number): void {
@@ -66,21 +57,17 @@ export class GhostAI {
 
     switch (this.state) {
       case "LOOK_AWAY":
-        if (this.rng() < this.profile.fakeTurnChance) {
-          this.transitionTo(now, "FAKE_TURN", fakeTurnDurationMs(this.profile));
-        } else {
-          this.transitionTo(now, "TURNING_TO_LOOK", this.profile.ghostTurnDurationMs);
-        }
+        this.transitionTo(now, "TURNING_TO_LOOK", GHOST_TURN_DURATION_MS);
         break;
       case "TURNING_TO_LOOK":
-        this.transitionTo(now, "LOOKING", this.profile.ghostLookingDurationMs);
+        this.transitionTo(now, "LOOKING", randomLookingDuration(this.rng));
         break;
       case "LOOKING":
-        this.transitionTo(now, "TURNING_AWAY", this.profile.ghostTurnDurationMs);
+        this.transitionTo(now, "TURNING_AWAY", GHOST_TURN_DURATION_MS);
         break;
       case "TURNING_AWAY":
-      case "FAKE_TURN":
-        this.transitionTo(now, "LOOK_AWAY", randomLookAwayDuration(this.rng, this.profile));
+        this.musicCycle += 1;
+        this.transitionTo(now, "LOOK_AWAY", musicPhaseDurationMs(this.musicCycle));
         break;
     }
   }
@@ -107,6 +94,14 @@ export class GhostAI {
     return this.stateDuration;
   }
 
+  getMusicCycle(): number {
+    return this.musicCycle;
+  }
+
+  getMusicPlaybackRate(): number {
+    return musicPlaybackRate(this.musicCycle);
+  }
+
   /** 暫停/恢復時校正計時基準點，讓恢復後的剩餘時間跟暫停前一致（見 GameRoom 的 pause/resume）。 */
   shiftClock(deltaMs: number): void {
     this.stateStartedAt += deltaMs;
@@ -128,15 +123,19 @@ export class GhostReplicaAI {
   private state: GhostState = "LOOK_AWAY";
   private stateStartedAt: number;
   private stateDuration = 0;
+  private musicCycle = 0;
+  private musicPlaybackRate = 1;
 
   constructor(now: number) {
     this.stateStartedAt = now;
   }
 
-  applyServerState(state: GhostState, stateStartedAtMs: number, stateDurationMs: number): void {
+  applyServerState(state: GhostState, stateStartedAtMs: number, stateDurationMs: number, musicCycle = 0, musicPlaybackRate = 1): void {
     this.state = state;
     this.stateStartedAt = stateStartedAtMs;
     this.stateDuration = stateDurationMs;
+    this.musicCycle = musicCycle;
+    this.musicPlaybackRate = musicPlaybackRate;
   }
 
   isLooking(): boolean {
@@ -153,5 +152,13 @@ export class GhostReplicaAI {
 
   getFacingPlayerAmount(now: number): number {
     return computeFacingAmount(this.state, now - this.stateStartedAt, this.stateDuration);
+  }
+
+  getMusicCycle(): number {
+    return this.musicCycle;
+  }
+
+  getMusicPlaybackRate(): number {
+    return this.musicPlaybackRate;
   }
 }

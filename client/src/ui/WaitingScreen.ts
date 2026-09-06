@@ -1,4 +1,4 @@
-/** 等待畫面（對應 PRD 13 章「已加入遊戲，請等待主持人開始」），教學畫面關閉後、COUNTDOWN 開始前顯示。 */
+/** 等待畫面（對應 PRD 13 章「已加入遊戲，請等待主持人開始」），教學畫面關閉後、PLAYING 開始前顯示。 */
 const DEFAULT_MESSAGE = "已加入遊戲，請等待主持人開始";
 
 export class WaitingScreen {

@@ -33,20 +33,19 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 .danger-button { color: #f0aea4; }
 .eyebrow { color: #a0d4b3; font-size: 12px; letter-spacing: .2em; }
 
-/* 玩家畫面：保留大片視野，狀態分布在畫面的三個上角。 */
+/* 玩家畫面：保留大片視野，操作提示只在畫面下方呈現。 */
 .player-hud, .player-controls { position: absolute; inset: 0; pointer-events: none; }
-.signal-status { --signal: #8deab0; display: flex; align-items: center; gap: 15px; }
-.signal-status[data-signal="red"] { --signal: #ff8b80; }
-.signal-status[data-signal="amber"] { --signal: #efca78; }
-.signal-status[data-signal="idle"] { --signal: #b1c4c0; }
-.signal-lamp { display: block; flex: none; width: 54px; height: 54px; border: 13px solid #243339; border-radius: 50%; background: var(--signal); box-shadow: 0 0 18px color-mix(in srgb, var(--signal) 30%, transparent), inset 0 0 9px #faffce80; }
-.signal-label { display: block; color: var(--signal); font-size: 23px; font-weight: 700; white-space: nowrap; }
-.signal-timer { display: block; margin-top: 3px; font: 600 32px/1.1 "Bahnschrift", "DIN Alternate", sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .035em; }
-.player-hud > .signal-status { position: absolute; inset: 20px 20px auto; display: block; }
-.player-hud .signal-lamp { width: 70px; height: 70px; border-width: 19px; box-shadow: 0 2px 24px #162b3b40; }
-.player-hud .signal-status > div { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); min-width: 176px; padding: 12px 26px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); text-align: center; }
-.player-hud .signal-label { font-size: 27px; }
-.player-hud .signal-timer { font-size: 36px; }
+.game-status { --status-color: #e5c17d; display: flex; align-items: center; gap: 12px; color: var(--status-color); }
+.game-status[data-status="looking"] { --status-color: #f0dfae; }
+.game-status[data-status="turning"], .game-status[data-status="paused"] { --status-color: #c9b58a; }
+.game-status[data-status="waiting"], .game-status[data-status="over"] { --status-color: #b1c4c0; }
+.status-wave { display: flex; align-items: end; justify-content: center; gap: 4px; width: 29px; height: 25px; flex: none; }
+.status-wave i { display: block; width: 4px; height: 8px; border-radius: 3px; background: var(--status-color); box-shadow: 0 0 9px color-mix(in srgb, var(--status-color) 45%, transparent); animation: status-wave 850ms ease-in-out infinite alternate; }
+.status-wave i:nth-child(2) { height: 17px; animation-delay: -300ms; }
+.status-wave i:nth-child(3) { height: 12px; animation-delay: -520ms; }
+.game-status[data-status="looking"] .status-wave i, .game-status[data-status="waiting"] .status-wave i, .game-status[data-status="over"] .status-wave i { animation-play-state: paused; }
+@keyframes status-wave { from { transform: scaleY(.45); opacity: .55; } to { transform: scaleY(1); opacity: 1; } }
+.signal-label { display: block; color: var(--status-color); font-size: 23px; font-weight: 700; white-space: nowrap; }
 .player-health { position: absolute; top: 105px; left: 28px; color: #f6e3c1; font-size: 19px; letter-spacing: 3px; text-shadow: 0 2px 5px #1d272e; }
 .survivor-count > span { display: block; color: #e8ece0; font-size: 15px; }
 .survivor-count > div { margin-top: 7px; font: 500 29px/1.2 "Bahnschrift", sans-serif; font-variant-numeric: tabular-nums; }
@@ -57,16 +56,14 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 .crosshair::before, .crosshair::after { content: ""; position: absolute; background: #fffde8; box-shadow: 0 1px 3px #5e512050; }
 .crosshair::before { top: 10px; width: 22px; height: 2px; }
 .crosshair::after { left: 10px; width: 2px; height: 22px; }
-.foot-button { pointer-events: auto; position: absolute; bottom: 24px; width: 108px; height: 85px; border: 1px solid #d6e6c650; border-radius: 15px; background: #253930b8; display: grid; grid-template-columns: 1fr auto; align-content: center; padding: 10px 17px; column-gap: 8px; text-align: left; touch-action: none; backdrop-filter: blur(8px); }
+.foot-button { pointer-events: auto; position: absolute; bottom: 24px; width: 108px; height: 85px; border: 1px solid #d6e6c650; border-radius: 15px; background: #253930b8; display: grid; grid-template-columns: 1fr auto; align-content: center; padding: 10px 17px; column-gap: 8px; text-align: center; touch-action: none; backdrop-filter: blur(8px); }
 .foot-button--left { left: 24px; }
 .foot-button--right { right: 24px; }
 .foot-arrow { grid-column: 1 / -1; font-size: 26px; line-height: 1.1; color: #c7ebce; }
 .foot-button > span:nth-child(2) { font-size: 15px; }
-.foot-button kbd { font-size: 12px; border: 1px solid #e5ebd34d; border-radius: 3px; width: 20px; text-align: center; }
 .foot-button.is-pressed { transform: translateY(3px); background: #408360dc; }
 .foot-button.is-rejected { background: #996341e6; }
 .step-hint { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); color: #fff9e4; font-size: 12px; letter-spacing: .1em; text-shadow: 0 1px 6px #272719; white-space: nowrap; }
-.start-countdown { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); font: 700 100px "Bahnschrift", sans-serif; color: #fffce2; text-shadow: 0 4px 25px #192c37aa; }
 .game-toast { position: absolute; top: 140px; left: 50%; transform: translateX(-50%); background: #293931ef; border: 1px solid #cfdcbc50; border-radius: 9px; padding: 10px 24px; font-size: 18px; white-space: nowrap; }
 .game-toast[data-variant="warn"], .game-toast[data-variant="danger"] { background: #833e31ef; }
 .sprint-banner { position: absolute; top: 38%; width: 100%; text-align: center; font-size: 36px; font-weight: 700; color: #fff0c5; text-shadow: 0 2px 10px #703812; }
@@ -85,7 +82,10 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 .host-card h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
 .phase-label { display: block; margin: -5px 0 14px; color: var(--muted); font-size: 11px; }
 .host-card .signal-label { font-size: 20px; }
-.host-card .signal-timer { font-size: 29px; }
+.host-card .game-status { min-height: 29px; }
+.music-retry-button { width: 100%; margin-top: 10px; color: #183a2c; background: #dfc681; border-color: transparent; font-size: 12px; }
+.music-retry-button:hover { background: #f1d99c; }
+.player-music-retry { pointer-events: auto; position: absolute; top: 92px; left: 50%; width: auto; transform: translateX(-50%); z-index: 5; }
 .host-card .survivor-count { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
 .host-card .survivor-count > div { margin-top: 6px; }
 .host-actions { display: flex; gap: 7px; margin-top: 14px; }
@@ -93,7 +93,7 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 .setting-row { margin-bottom: 12px; }
 .setting-row:last-child { margin-bottom: 0; }
 .setting-row > span { display: block; margin-bottom: 6px; font-size: 12px; color: #c8d4bb; }
-.setting-options { grid-template-columns: repeat(3, 1fr); }
+.setting-options { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
 .setting-options button:disabled { opacity: .45; cursor: not-allowed; }
 .camera-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .camera-modes button { font-size: 12px; padding: 7px 4px; }
@@ -148,11 +148,6 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
 @media (max-height: 600px) and (orientation: landscape) {
   body { padding: 6px max(6px, env(safe-area-inset-right)) 6px max(6px, env(safe-area-inset-left)); }
   #app { border-radius: 8px; }
-  .player-hud > .signal-status { inset: 13px 14px auto; }
-  .player-hud .signal-lamp { width: 52px; height: 52px; border-width: 14px; }
-  .player-hud .signal-status > div { top: 0; min-width: 145px; padding: 8px 20px; border-radius: 9px; }
-  .player-hud .signal-label { font-size: 20px; }
-  .player-hud .signal-timer { font-size: 28px; }
   .player-health { top: 72px; left: 17px; font-size: 15px; }
   .player-survivors { top: 13px; right: 14px; min-width: 123px; padding: 9px 16px; border-radius: 9px; }
   .player-survivors > span { font-size: 12px; }
@@ -185,8 +180,7 @@ kbd { font-family: "Cascadia Mono", Consolas, monospace; }
   .host-viewport { inset: 0 0 46% 0; }
   .host-panel { inset: 54% 0 0; width: 100%; display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
   .host-card { min-width: 0; }
-  .host-card .signal-status { gap: 8px; }
-  .host-card .signal-lamp { width: 36px; height: 36px; border-width: 9px; }
+  .host-card .game-status { gap: 8px; }
   .host-card .signal-label { font-size: 16px; }
   .camera-hint { font-size: 9px; }
 }

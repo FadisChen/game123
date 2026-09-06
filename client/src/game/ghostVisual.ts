@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { createCharacter } from "./characterModels";
 
-/** 同一個立體娃娃在兩端以伺服器狀態轉身，假動作也保留完整插值。 */
+/** 同一個立體娃娃在兩端以伺服器狀態轉身，轉身期間保留完整插值。 */
 export class GhostVisual {
   private readonly model: THREE.Group;
 
