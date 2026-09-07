@@ -8,7 +8,7 @@ import {
 } from "./net/SocketClient";
 import { NetworkedGameController } from "./game/NetworkedGameController";
 import type { JoinErrorCode } from "shared";
-import { installLandscapeGuard, requestLandscape } from "./ui/LandscapeGuard";
+import { installLandscapeGuard } from "./ui/LandscapeGuard";
 
 function joinErrorMessage(error: JoinErrorCode): string {
   switch (error) {
@@ -43,6 +43,9 @@ if (!app) {
   throw new Error("#app container not found");
 }
 
+if (!new URLSearchParams(location.search).has("offline")) {
+  app.classList.add("portrait-setup");
+}
 installLandscapeGuard(app);
 
 if (new URLSearchParams(location.search).has("offline")) {
@@ -54,7 +57,6 @@ if (new URLSearchParams(location.search).has("offline")) {
   const initialRoomCode = parseRoomCodeFromLocation();
 
   const joinScreen = new JoinScreen(app, initialRoomCode, (roomCode, name) => {
-    void requestLandscape();
     joinScreen.setBusy(true);
     const socketClient = new SocketClient();
     void socketClient

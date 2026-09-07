@@ -17,12 +17,10 @@ import {
 const GHOST_OFFSET_BEYOND_FINISH_M = 1;
 
 /**
- * 預設機位刻意壓低成接近賽道高度的斜角，而不是正上方俯瞰：這個角度看得到地平線與鬼的正面，
- * 投影給現場觀眾看時比高空俯瞰更有臨場感。往後退到 -18 是為了讓最外側車道（±9.5m）的玩家
- * 站在起點時仍落在水平視野內——再往前就會被畫面左右邊緣裁掉。
+ * 主辦方以斜俯視看完整跑道，對照參考圖下半部，讓玩家分布與終點模型同時清楚可見。
  */
-const BIRDSEYE_POSITION = new THREE.Vector3(0, 9, -18);
-const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FIELD_LENGTH * 0.75);
+const BIRDSEYE_POSITION = new THREE.Vector3(0, 26, -23);
+const BIRDSEYE_LOOK_AT = new THREE.Vector3(0, 0, FIELD_LENGTH * 0.5);
 const FOLLOW_HEIGHT_M = 9;
 const FOLLOW_BACK_OFFSET_M = 7;
 const FOLLOW_LOOKAHEAD_M = 5;

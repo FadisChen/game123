@@ -103,6 +103,7 @@ export class NetworkedGameController {
     this.socketClient.onConnectionState((state) => this.setConnectionState(state));
     this.socketClient.onReconnect(() => void this.resumeSession());
     this.applySnapshot(initialSnapshot);
+    container.classList.remove("portrait-setup");
 
     requestAnimationFrame(() => this.loop());
   }
@@ -228,7 +229,11 @@ export class NetworkedGameController {
     if (settings.playerMode === "main") {
       this.motionInput.stop();
     }
-    if (modeChanged) this.applyMotionAvailability(false);
+    if (modeChanged) {
+      this.applyMotionAvailability(false);
+      // 先讓直向玩家按下教學確認，才能請求裝置感應權限。
+      this.container.classList.toggle("motion-permission-pending", this.playerMode === "motion");
+    }
   }
 
   /** 感應器實際可不可用是「每個玩家自己的裝置」決定的，跟房間層級的 playerMode 分開追蹤；
@@ -237,6 +242,7 @@ export class NetworkedGameController {
    * 不需要在這裡搶著呼叫 requestFullscreen——那個 API 只能在使用者手勢當下呼叫，這裡的觸發時機
    * （socket 事件、感應逾時 timeout）都不是使用者手勢，硬呼叫在部分瀏覽器反而會產生非預期的全螢幕狀態。 */
   private applyMotionAvailability(available: boolean): void {
+    this.container.classList.remove("motion-permission-pending");
     this.controls.setMotionAvailable(available);
     this.container.classList.toggle(
       "motion-mode",
@@ -332,6 +338,7 @@ export class NetworkedGameController {
     if (this.playerMode === "motion") {
       const available = await this.motionInput.requestPermission();
       this.applyMotionAvailability(available);
+      this.syncScreensToPhase();
     }
     if (this.serverPhase === "WAITING") {
       this.teaching.setVisible(false);

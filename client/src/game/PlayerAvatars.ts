@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { FINISH_DISTANCE_M, MAX_PLAYERS_PER_ROOM, STEP_TWEEN_MS, type PlayerSummary } from "shared";
 import { createPlayerGeometry } from "./characterModels";
 import { FIELD_LENGTH } from "./fieldEnvironment";
+import { loadBlenderPlayerGeometry } from "./blenderAssets";
 
 /** 被抓到出局時倒地的動畫長度；夠慢到旁邊的玩家看得見發生了什麼，又不會拖到整局節奏。 */
 export const COLLAPSE_DURATION_MS = 600;
@@ -112,6 +113,13 @@ export class PlayerAvatars {
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     scene.add(this.mesh);
+    void loadBlenderPlayerGeometry().then((geometry) => {
+      this.mesh.geometry.dispose();
+      this.mesh.geometry = geometry;
+      this.mesh.userData.blenderAsset = "player";
+    }).catch((error) => {
+      console.warn("Could not load Blender asset: player; keeping procedural model.", error);
+    });
   }
 
   update(players: PlayerSummary[], excludeId?: string, finishDistanceM = FINISH_DISTANCE_M): void {

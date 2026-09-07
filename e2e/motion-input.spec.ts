@@ -76,7 +76,7 @@ test("motion mode turns one vertical shake into alternating steps", async ({
 }) => {
   const hostContext = await browser.newContext();
   const playerContext = await browser.newContext({
-    viewport: { width: 900, height: 420 },
+    viewport: { width: 390, height: 844 },
   });
   const host = await hostContext.newPage();
   const player = await playerContext.newPage();
@@ -109,8 +109,10 @@ test("motion mode turns one vertical shake into alternating steps", async ({
     });
 
     await player.goto(`/join/${roomCode}`);
+    await expect(player.locator(".landscape-guard")).toBeHidden({ timeout: 2000 });
     await player.getByPlaceholder("你的名字").fill("Motion");
     await player.getByRole("button", { name: "加入遊戲" }).click();
+    await expect(player.locator(".landscape-guard")).toBeHidden({ timeout: 2000 });
     await player.getByRole("button", { name: "我知道了" }).click();
     await expect(player.locator(".step-hint")).toHaveText(
       "上下晃動，一次前進一步",
@@ -207,6 +209,10 @@ test("motion mode falls back to foot buttons when the sensor never reports data"
     );
     await expect(player.locator(".game-canvas")).toHaveCount(0);
     await expect(player.locator(".motion-prompt")).toBeVisible();
+    await expect(player.locator(".landscape-guard")).toBeHidden();
+    await player.setViewportSize({ width: 390, height: 844 });
+    await expect(player.locator(".landscape-guard")).toBeVisible();
+    await player.setViewportSize({ width: 900, height: 420 });
     await expect(player.locator(".landscape-guard")).toBeHidden();
     await player.locator(".foot-button--left").click();
     await expect.poll(() => sent).toEqual(["left"]);

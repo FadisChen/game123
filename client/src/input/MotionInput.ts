@@ -1,8 +1,8 @@
 import type { Foot } from "shared";
 
-const MOTION_TRIGGER_MPS2 = 3;
+const MOTION_TRIGGER_MPS2 = 2;
 const MOTION_RELEASE_MPS2 = 1;
-const MOTION_MIN_INTERVAL_MS = 350;
+const MOTION_MIN_INTERVAL_MS = 200;
 const MOTION_BASELINE_ALPHA = 0.08;
 const MOTION_WARMUP_SAMPLES = 6;
 const MOTION_SENSOR_TIMEOUT_MS = 1500;
@@ -71,6 +71,10 @@ export class MotionInput {
   }
 
   setGameplayActive(active: boolean): void {
+    if (this.gameplayActive !== active) {
+      this.armed = true;
+      this.lastTriggerAt = -Infinity;
+    }
     this.gameplayActive = active;
     window.clearTimeout(this.sensorTimeoutId);
     this.sensorTimeoutId = undefined;
@@ -132,14 +136,12 @@ export class MotionInput {
       this.warmupSamples -= 1;
       return;
     }
+    if (!this.gameplayActive) return;
 
     const now = performance.now();
     if (!this.armed) {
-      if (
-        Math.abs(delta) <= MOTION_RELEASE_MPS2 &&
-        now - this.lastTriggerAt >= MOTION_MIN_INTERVAL_MS
-      )
-        this.armed = true;
+      // 冷卻期間也要記住回到靜止，否則連續晃動會漏掉下一步。
+      if (Math.abs(delta) <= MOTION_RELEASE_MPS2) this.armed = true;
       return;
     }
     if (

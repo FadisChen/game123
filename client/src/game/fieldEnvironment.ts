@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { createCharacter, part } from "./characterModels";
 import { barkTexture, sandTexture, skyTexture } from "./fieldTextures";
+import { replaceWithBlenderAsset } from "./blenderAssets";
 
 export const PATH_HALF_WIDTH_M = 12;
 export const FIELD_HALF_WIDTH_M = 18;
@@ -91,6 +92,7 @@ export function buildFieldEnvironment(scene: THREE.Scene): void {
     guard.position.set(x, 0, FIELD_LENGTH + 0.7);
     guard.rotation.y = Math.PI;
     scene.add(guard);
+    void replaceWithBlenderAsset(guard, "guard");
   }
 
   const rng = random(37);
@@ -166,21 +168,26 @@ function buildTree(scene: THREE.Scene): void {
   branches.forEach((geometry) => geometry.dispose());
   tree.castShadow = tree.receiveShadow = true;
   root.add(tree);
+  void replaceWithBlenderAsset(root, "tree");
 }
 
 function buildHouse(scene: THREE.Scene, x: number): void {
   const z = FIELD_LENGTH + 3.1;
-  part(scene, new THREE.BoxGeometry(3.5, 2.35, 2.6), 0xe5dfc1, x, 1.18, z);
-  part(scene, new THREE.BoxGeometry(1.15, 1.8, 0.035), 0x365749, x, 0.9, z - 1.32);
-  for (const side of [-1, 1]) part(scene, new THREE.BoxGeometry(0.5, 0.65, 0.035), 0x576c52, x + side * 1.12, 1.15, z - 1.32);
+  const root = new THREE.Group();
+  root.position.set(x, 0, z);
+  scene.add(root);
+  part(root, new THREE.BoxGeometry(3.5, 2.35, 2.6), 0xe5dfc1, 0, 1.18, 0);
+  part(root, new THREE.BoxGeometry(1.15, 1.8, 0.035), 0x365749, 0, 0.9, -1.32);
+  for (const side of [-1, 1]) part(root, new THREE.BoxGeometry(0.5, 0.65, 0.035), 0x576c52, side * 1.12, 1.15, -1.32);
   for (const side of [-1, 1]) {
-    const roof = part(scene, new THREE.BoxGeometry(3.95, 0.16, 1.85), 0xa34f2c, x, 2.75, z + side * 0.71);
+    const roof = part(root, new THREE.BoxGeometry(3.95, 0.16, 1.85), 0xa34f2c, 0, 2.75, side * 0.71);
     roof.rotation.x = side * 0.48;
     for (let tile = 0; tile < 18; tile++) {
-      const ridge = part(scene, new THREE.CylinderGeometry(0.045, 0.045, 1.85, 6), 0xc27242, x - 1.87 + tile * 0.22, 2.84, z + side * 0.71);
+      const ridge = part(root, new THREE.CylinderGeometry(0.045, 0.045, 1.85, 6), 0xc27242, -1.87 + tile * 0.22, 2.84, side * 0.71);
       ridge.rotation.x = Math.PI / 2 + side * 0.48;
     }
   }
+  void replaceWithBlenderAsset(root, "house");
 }
 
 export function lightScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
