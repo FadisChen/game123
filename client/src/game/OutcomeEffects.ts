@@ -3,7 +3,9 @@ import { COLORS } from "shared";
 
 const ELIMINATION_DURATION_MS = 1100;
 const FINISH_DURATION_MS = 1800;
+const DAMAGE_DURATION_MS = 700;
 const DEBRIS_COUNT = 12;
+const BLOOD_DROPLET_COUNT = 18;
 const GRAVITY_M_PER_S2 = 9.8;
 
 interface ActiveEffect {
@@ -68,6 +70,74 @@ export class OutcomeEffects {
         debris.setMatrixAt(i, dummy.matrix);
       });
       debris.instanceMatrix.needsUpdate = true;
+    });
+  }
+
+  /** 扣血：在角色位置噴出一小簇紅色血滴，快速淡出但不取代淘汰特效。 */
+  spawnDamage(x: number, z: number, now: number): void {
+    const root = new THREE.Group();
+    root.position.set(x, 0, z);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: COLORS.alertRed,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.18, 0.28, 24),
+      ringMaterial,
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.06;
+    root.add(ring);
+
+    const bloodMaterial = new THREE.MeshBasicMaterial({
+      color: COLORS.alertRed,
+      transparent: true,
+      depthWrite: false,
+    });
+    const droplets = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.09, 6, 4),
+      bloodMaterial,
+      BLOOD_DROPLET_COUNT,
+    );
+    droplets.frustumCulled = false;
+    root.add(droplets);
+
+    const velocities = Array.from({ length: BLOOD_DROPLET_COUNT }, () => {
+      const angle = Math.random() * Math.PI * 2;
+      const outward = 1 + Math.random() * 1.5;
+      return new THREE.Vector3(
+        Math.cos(angle) * outward,
+        2.2 + Math.random() * 2.4,
+        Math.sin(angle) * outward,
+      );
+    });
+    const dummy = new THREE.Object3D();
+
+    this.add(root, now, DAMAGE_DURATION_MS, (progress, elapsedSeconds) => {
+      const fade = 1 - progress;
+      ring.scale.setScalar(1 + progress * 3.5);
+      ringMaterial.opacity = fade * 0.8;
+      bloodMaterial.opacity = fade;
+      velocities.forEach((velocity, i) => {
+        dummy.position.set(
+          velocity.x * elapsedSeconds,
+          Math.max(
+            0.08,
+            0.3 +
+              velocity.y * elapsedSeconds -
+              0.5 * GRAVITY_M_PER_S2 * elapsedSeconds * elapsedSeconds,
+          ),
+          velocity.z * elapsedSeconds,
+        );
+        dummy.scale.set(1, 0.75, 1);
+        dummy.rotation.set(elapsedSeconds * 5 + i, elapsedSeconds * 3 + i, 0);
+        dummy.updateMatrix();
+        droplets.setMatrixAt(i, dummy.matrix);
+      });
+      droplets.instanceMatrix.needsUpdate = true;
     });
   }
 

@@ -105,11 +105,19 @@ export class HostController {
         this.panel?.setStarting(true);
         // 主辦方鏡頭先推進、環繞玩家一圈、回到鳥瞰機位，再全螢幕倒數 3 秒，最後才真正呼叫 startGame。
         this.scene?.playStartCinematic(() => {
-          this.panel?.playCountdown(() => {
-            this.startSequenceActive = false;
-            this.panel?.setStarting(false);
-            this.runAction(this.socketClient.startGame(this.actionPayload()));
-          });
+          void this.socketClient
+            .startCountdown(this.actionPayload())
+            .then((ack) => {
+              if (ack.ok) return;
+              this.startSequenceActive = false;
+              this.panel?.setStarting(false);
+              this.panel?.showConnectionError(`控制操作失敗：${ack.error}`);
+            })
+            .catch(() => {
+              this.startSequenceActive = false;
+              this.panel?.setStarting(false);
+              this.panel?.showConnectionError("連線逾時，請稍候再試");
+            });
         });
       },
       onPause: () => this.runAction(this.socketClient.pauseGame(this.actionPayload())),
@@ -181,6 +189,20 @@ export class HostController {
       this.syncMusic(payload.serverNowMs);
     });
 
+    this.socketClient.onStartCountdown((payload) => {
+      this.clock.updateFromServerNow(payload.serverNowMs);
+      this.panel?.playCountdown(
+        payload.serverNowMs,
+        payload.durationMs,
+        () => this.clock.nowServerMs(),
+        () => {
+          this.startSequenceActive = false;
+          this.panel?.setStarting(false);
+          this.runAction(this.socketClient.startGame(this.actionPayload()));
+        },
+      );
+    });
+
     this.socketClient.onGhostStateChanged((payload) => {
       this.currentGhost = payload;
       this.ghostReplica.applyServerState(
@@ -240,7 +262,10 @@ export class HostController {
 
   /** room:playerStepped 沒有附帶完整快照，直接局部更新那一位玩家，讓鳥瞰畫面上的位置能逐步移動而不是等下一次快照才跳動。 */
   private handlePlayerStepped(payload: RoomPlayerSteppedPayload): void {
-    if (payload.result.kind === "caught") sfx.play("caught");
+    if (payload.result.kind === "caught") {
+      sfx.play("caught");
+      this.scene?.playDamageEffect(payload.playerId);
+    }
     const existing = this.players.get(payload.playerId);
     if (!existing) return;
 

@@ -114,6 +114,7 @@ test("each caught event plays one shot on the host and only the affected player"
     await expect(host.locator('.game-status[data-status="looking"]')).toBeVisible({ timeout: 20_000 });
     await Promise.all([p0.keyboard.press("ArrowLeft"), p1.keyboard.press("ArrowLeft")]);
     await p0.waitForTimeout(150);
+    await expect(p0.locator(".damage-flash")).toBeVisible({ timeout: 2000 });
     await p0.keyboard.press("ArrowRight"); // 最後一分扣光也只播放一次。
     await expect(p0.locator('.outcome-overlay[data-outcome="eliminated"]')).toBeVisible();
     await expect.poll(() => shotCount(host)).toBe(3);

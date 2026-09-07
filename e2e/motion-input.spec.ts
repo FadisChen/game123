@@ -163,6 +163,62 @@ test("motion mode turns one vertical shake into alternating steps", async ({
   }
 });
 
+test("motion player vibrates instead of flashing red when a step is caught", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const playerContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  const host = await hostContext.newPage();
+  const player = await playerContext.newPage();
+
+  try {
+    await host.goto("/host.html");
+    const roomCode = (await host.locator(".room-code").textContent())!.trim();
+    await host.getByRole("button", { name: "感應式", exact: true }).click();
+    await player.addInitScript(() => {
+      Object.defineProperty(window, "damageVibrations", { value: [] });
+      Object.defineProperty(navigator, "vibrate", {
+        configurable: true,
+        value: () => {
+          (window as Window & { damageVibrations: boolean[] }).damageVibrations.push(true);
+          return true;
+        },
+      });
+    });
+    await player.addInitScript(() => {
+      class MockDeviceMotionEvent {}
+      Object.assign(MockDeviceMotionEvent, {
+        requestPermission: async () => "granted",
+      });
+      Object.defineProperty(window, "DeviceMotionEvent", {
+        configurable: true,
+        value: MockDeviceMotionEvent,
+      });
+    });
+    await player.goto(`/join/${roomCode}`);
+    await player.getByPlaceholder("你的名字").fill("受傷感應玩家");
+    await player.getByRole("button", { name: "加入遊戲" }).click();
+    await player.getByRole("button", { name: "我知道了" }).click();
+    for (let i = 0; i < 7; i++) await emitVerticalMotion(player, 0);
+
+    await host.getByRole("button", { name: "開始遊戲" }).click();
+    await expect(host.locator('.game-status[data-status="looking"]')).toBeVisible({ timeout: 20_000 });
+    await emitVerticalMotion(player, 0);
+    await emitVerticalMotion(player, 4);
+    await expect
+      .poll(() =>
+        player.evaluate(
+          () => (window as Window & { damageVibrations: boolean[] }).damageVibrations.length,
+        ),
+      )
+      .toBeGreaterThan(0);
+    await expect(player.locator(".damage-flash")).toBeHidden();
+  } finally {
+    await hostContext.close();
+    await playerContext.close();
+  }
+});
+
 test("motion mode falls back to foot buttons when the sensor never reports data", async ({
   browser,
 }) => {

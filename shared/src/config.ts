@@ -66,6 +66,7 @@ export const MAX_PLAYERS_PER_ROOM = 100;
 export const ROOM_CODE_LENGTH = 4;
 export const STEP_RATE_LIMIT_WINDOW_MS = 1000;
 export const MAX_STEP_EVENTS_PER_WINDOW = 10;
+export const START_COUNTDOWN_MS = 3000;
 
 // 色票（對應使用者提供的美術參考圖）
 export const COLORS = {

@@ -1,6 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import {
   SOCKET_EVENTS,
+  START_COUNTDOWN_MS,
   normalizeRoomSettings,
   type HostCreateRoomAck,
   type HostResumeRoomAck,
@@ -138,6 +139,29 @@ export function registerHostHandlers(
       return;
     }
     withHostRoom(io, socket, roomManager, reply, (room, now) => room.startGame(now));
+  });
+
+  socket.on(SOCKET_EVENTS.hostStartCountdown, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<HostRoomActionAck>(ack);
+    if (!isEmptyPayload(payload)) {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+      return;
+    }
+    const room = getAuthenticatedHostRoom(socket, roomManager);
+    if (!room) {
+      reply({ ok: false, error: "NOT_AUTHENTICATED" });
+      return;
+    }
+    if (room.phase !== "WAITING") {
+      reply({ ok: false, error: "ROOM_NOT_WAITING" });
+      return;
+    }
+    const serverNowMs = Date.now();
+    io.to(room.code).emit(SOCKET_EVENTS.roomStartCountdown, {
+      serverNowMs,
+      durationMs: START_COUNTDOWN_MS,
+    });
+    reply({ ok: true });
   });
 
   socket.on(SOCKET_EVENTS.hostPauseGame, (payload: unknown, ack: unknown) => {

@@ -21,6 +21,7 @@ import { sfx } from "./audio";
 import { ClockSync } from "../net/ClockSync";
 import { clearPlayerSession, type SocketClient } from "../net/SocketClient";
 import { MotionInput } from "../input/MotionInput";
+import { StartCountdownScreen } from "../ui/StartCountdownScreen";
 
 /**
  * 玩家端的網路版控制器：不再自己跑 GhostAI/Player 判定，全部改成送出意圖給伺服器，
@@ -34,6 +35,7 @@ export class NetworkedGameController {
   private readonly teaching: TeachingScreen;
   private readonly waiting: WaitingScreen;
   private readonly gameOver: GameOverScreen;
+  private readonly startCountdown: StartCountdownScreen;
   private readonly controls: Controls;
   private readonly motionInput: MotionInput;
   private readonly socketClient: SocketClient;
@@ -92,6 +94,7 @@ export class NetworkedGameController {
       undefined,
       "等待主辦方重新開始",
     );
+    this.startCountdown = new StartCountdownScreen(container);
 
     this.hud.setVisible(false);
     this.controls.setVisible(false);
@@ -116,6 +119,16 @@ export class NetworkedGameController {
       this.serverPhase = payload.phase;
       this.applyRoomSettings(payload.settings);
       this.syncScreensToPhase();
+    });
+
+    this.socketClient.onStartCountdown((payload) => {
+      if (this.serverPhase !== "WAITING") return;
+      this.clock.updateFromServerNow(payload.serverNowMs);
+      this.startCountdown.play(
+        payload.serverNowMs,
+        payload.durationMs,
+        () => this.clock.nowServerMs(),
+      );
     });
 
     this.socketClient.onGhostStateChanged((payload) => {
@@ -253,6 +266,7 @@ export class NetworkedGameController {
   /** 重連後光靠事件流可能錯過中間狀態，所以每次拿到完整快照都重新對齊一次畫面。 */
   private syncScreensToPhase(): void {
     if (this.connectionState !== "connected") {
+      this.startCountdown.hide();
       this.motionPrompt.hidden = true;
       this.motionInput.setGameplayActive(false);
       this.controls.setVisible(false);
@@ -265,6 +279,7 @@ export class NetworkedGameController {
       return;
     }
     this.waiting.clearError();
+    if (this.serverPhase !== "WAITING") this.startCountdown.hide();
     this.motionPrompt.hidden =
       this.playerMode !== "motion" ||
       this.myOutcome !== "active" ||
@@ -373,6 +388,8 @@ export class NetworkedGameController {
       case "caught":
         this.hud.setScore(result.scoreAfter);
         this.hud.showToast("被發現! -1分", "warn");
+        if (this.playerMode === "main") this.hud.showDamageFlash();
+        else this.hud.vibrateDamage();
         this.scene?.startCaughtShake(now);
         sfx.play("caught");
         if (result.eliminated) {
@@ -407,7 +424,7 @@ export class NetworkedGameController {
   private personalConclusionMessage(): string {
     return this.myOutcome === "finished"
       ? "🏆 你已抵達終點！請等待本回合結束"
-      : "❌ 你已被淘汰，請等待本回合結束";
+      : "❌ 你已被淘汰，我們懷念你";
   }
 
   /** 距終點剩 FINAL_SPRINT_REMAINING_M 內時觸發一次緊張提示（對應 PRD 22.3），跟 Phase 1 版本邏輯相同。 */
@@ -421,6 +438,7 @@ export class NetworkedGameController {
 
   private handleGameOver(payload: RoomGameOverPayload): void {
     this.serverPhase = "GAME_OVER";
+    this.startCountdown.hide();
     this.motionPrompt.hidden = true;
     this.motionInput.setGameplayActive(false);
     this.controls.setVisible(false);

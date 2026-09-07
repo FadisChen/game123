@@ -131,6 +131,11 @@ export interface RoomPhaseChangedPayload {
   settings: RoomSettings;
 }
 
+export interface RoomStartCountdownPayload {
+  serverNowMs: number;
+  durationMs: number;
+}
+
 export interface RoomPlayerSteppedPayload {
   playerId: PlayerId;
   foot: Foot;
@@ -162,6 +167,7 @@ export interface RoomPlayerBoostChangedPayload {
 export const SOCKET_EVENTS = {
   hostCreateRoom: "host:createRoom",
   hostResumeRoom: "host:resumeRoom",
+  hostStartCountdown: "host:startCountdown",
   hostStartGame: "host:startGame",
   hostPauseGame: "host:pauseGame",
   hostResumeGame: "host:resumeGame",
@@ -173,6 +179,7 @@ export const SOCKET_EVENTS = {
   playerStep: "player:step",
 
   roomState: "room:state",
+  roomStartCountdown: "room:startCountdown",
   roomPlayerJoined: "room:playerJoined",
   roomPlayerLeft: "room:playerLeft",
   roomPhaseChanged: "room:phaseChanged",

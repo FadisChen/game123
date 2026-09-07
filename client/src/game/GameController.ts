@@ -120,6 +120,7 @@ export class GameController {
       case "caught":
         this.hud.setScore(result.scoreAfter);
         this.hud.showToast("被發現! -1分", "warn");
+        this.hud.showDamageFlash();
         this.scene.startCaughtShake(now);
         sfx.play("caught");
         if (result.eliminated) {

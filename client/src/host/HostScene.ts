@@ -229,6 +229,13 @@ export class HostScene {
     else this.outcomeEffects.spawnFinish(avatar.x, avatar.z, now);
   }
 
+  /** 玩家扣血時的短促濺血，不改變角色的淘汰／抵達狀態。 */
+  playDamageEffect(playerId: string): void {
+    const avatar = this.latestAvatars.get(playerId);
+    if (!avatar) return;
+    this.outcomeEffects.spawnDamage(avatar.x, avatar.z, performance.now());
+  }
+
   /**
    * 開場運鏡（主辦方點擊開始遊戲後）：鏡頭從最遠處推進到玩家上方、環繞一圈，
    * 再回到鳥瞰預設機位；期間忽略鏡頭模式切換與方向鍵，避免動畫被打斷。結束後呼叫 onComplete

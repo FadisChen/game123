@@ -13,6 +13,9 @@
   font-family: "Microsoft JhengHei", "PingFang TC", sans-serif;
   font-synthesis: none;
 }
+body.host-page {
+  --host-panel-width: 276px;
+}
 
 * {
   box-sizing: border-box;
@@ -307,11 +310,39 @@ kbd {
   animation: final-sprint-pulse 1.1s ease-in-out infinite;
 }
 
+.damage-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  pointer-events: none;
+}
+.damage-flash[hidden] {
+  display: none;
+}
+.damage-flash-active {
+  animation: damage-flash 500ms ease-out forwards;
+}
+@keyframes damage-flash {
+  0% {
+    background: #f9414400;
+  }
+  14% {
+    background: #f94144b8;
+  }
+  42% {
+    background: #f9414454;
+  }
+  100% {
+    background: #f9414400;
+  }
+}
+
 /* 主辦方：鳥瞰視野與獨立捲動的右側面板。 */
 .host-viewport {
   position: absolute;
-  inset: 0 276px 0 0;
+  inset: 0 var(--host-panel-width) 0 0;
   overflow: hidden;
+  transition: right 220ms ease;
 }
 .host-brand {
   position: absolute;
@@ -348,7 +379,7 @@ kbd {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 276px;
+  width: var(--host-panel-width);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -357,6 +388,40 @@ kbd {
   background: #242d2ee8;
   scrollbar-width: thin;
   scrollbar-color: #66706b transparent;
+  transition: transform 220ms ease;
+  z-index: 20;
+}
+.host-panel-toggle {
+  position: absolute;
+  top: 24px;
+  right: calc(var(--host-panel-width) + 10px);
+  z-index: 30;
+  padding: 9px 11px;
+  border-color: #a0edc366;
+  border-radius: 9px;
+  color: #dff7df;
+  background: #203842e6;
+  backdrop-filter: blur(10px);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transition:
+    right 220ms ease,
+    background 140ms,
+    transform 140ms;
+}
+.host-panel-toggle:hover {
+  background: #327162;
+}
+.host-panel-closed .host-viewport {
+  right: 0;
+}
+.host-panel-closed .host-panel {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+.host-panel-closed .host-panel-toggle {
+  right: 10px;
 }
 .host-card {
   flex: none;
@@ -698,7 +763,7 @@ kbd {
 .ranking-list {
   margin-bottom: 18px;
 }
-/* 主辦方點擊開始遊戲後、運鏡結束時的全螢幕紅色數字倒數。 */
+/* 主辦方點擊開始遊戲後、運鏡結束時，主辦方與玩家共用的全螢幕紅色數字倒數。 */
 .countdown-overlay {
   position: absolute;
   inset: 0;
@@ -868,6 +933,9 @@ kbd {
   }
 }
 @media (max-width: 1000px) {
+  body.host-page {
+    --host-panel-width: 236px;
+  }
   .host-panel {
     width: 236px;
     padding: 9px;
@@ -898,6 +966,13 @@ kbd {
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-content: start;
+  }
+  .host-panel-toggle {
+    top: calc(54% + 10px);
+    right: 10px;
+  }
+  .host-panel-closed .host-viewport {
+    inset: 0;
   }
   .host-card {
     min-width: 0;

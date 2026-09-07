@@ -1,5 +1,30 @@
 import { test, expect } from "@playwright/test";
 
+test("main-view player mirrors the host's three-second start countdown", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const playerContext = await browser.newContext({ viewport: { width: 960, height: 540 } });
+  const host = await hostContext.newPage();
+  const player = await playerContext.newPage();
+  try {
+    await host.goto("/host.html");
+    const code = await host.locator(".room-code").textContent();
+    await player.goto(`/join/${code}`);
+    await player.getByPlaceholder("你的名字").fill("Countdown");
+    await player.getByRole("button", { name: "加入遊戲" }).click();
+    await player.getByRole("button", { name: "我知道了" }).click();
+
+    await host.getByRole("button", { name: "開始遊戲" }).click();
+    await expect(host.locator(".countdown-digit")).toBeVisible({ timeout: 15_000 });
+    await expect(player.locator(".start-countdown")).toBeVisible();
+    await expect(player.locator(".start-countdown .countdown-digit")).toHaveText("3");
+    await expect(player.locator(".start-countdown .countdown-digit")).toHaveText("2", { timeout: 1_500 });
+    await expect(player.locator(".start-countdown .countdown-digit")).toHaveText("1", { timeout: 1_500 });
+  } finally {
+    await hostContext.close();
+    await playerContext.close();
+  }
+});
+
 test("player keyboard and touch share stepping rules; portrait and paused play block input", async ({ browser }) => {
   const hostContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -33,7 +58,7 @@ test("player keyboard and touch share stepping rules; portrait and paused play b
     await host.getByRole("button", { name: "開始遊戲" }).click();
     await expect(player.locator(".player-controls")).toBeVisible();
     await expect(player.locator(".player-hud .game-status")).toHaveCount(0);
-    await expect(player.locator(".start-countdown")).toHaveCount(0);
+    await expect(player.locator(".start-countdown")).toBeHidden();
     await player.keyboard.press("ArrowLeft");
     await expect.poll(() => results.length).toBe(1);
     expect(results[0]).toBe("advanced");

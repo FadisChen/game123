@@ -23,6 +23,7 @@ import {
   type RoomPlayerBoostChangedPayload,
   type RoomPlayerConnectionChangedPayload,
   type RoomPlayerSteppedPayload,
+  type RoomStartCountdownPayload,
   type RoomStateSnapshot,
 } from "shared";
 
@@ -200,6 +201,9 @@ export class SocketClient {
   resumeHost(payload: HostResumeRoomPayload): Promise<HostResumeRoomAck> {
     return this.emitAck(SOCKET_EVENTS.hostResumeRoom, payload);
   }
+  startCountdown(payload: HostRoomActionPayload): Promise<HostRoomActionAck> {
+    return this.emitAck(SOCKET_EVENTS.hostStartCountdown, payload);
+  }
   startGame(payload: HostRoomActionPayload): Promise<HostRoomActionAck> {
     return this.emitAck(SOCKET_EVENTS.hostStartGame, payload);
   }
@@ -239,6 +243,9 @@ export class SocketClient {
   }
   onPhaseChanged(cb: (payload: RoomPhaseChangedPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomPhaseChanged, cb);
+  }
+  onStartCountdown(cb: (payload: RoomStartCountdownPayload) => void): void {
+    this.socket.on(SOCKET_EVENTS.roomStartCountdown, cb);
   }
   onGhostStateChanged(cb: (payload: GhostVisualState) => void): void {
     this.socket.on(SOCKET_EVENTS.ghostStateChanged, cb);

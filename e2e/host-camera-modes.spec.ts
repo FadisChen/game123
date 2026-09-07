@@ -71,6 +71,30 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+test("host control panel can be collapsed and reopened", async ({ page }) => {
+  await page.goto("/host.html");
+  const panel = page.locator(".host-panel");
+  const toggle = page.getByRole("button", { name: "收起主辦方控制面板" });
+
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await toggle.click();
+  await expect(page.locator("#app")).toHaveClass(/host-panel-closed/);
+  await expect(page.locator(".host-viewport")).toHaveCSS("right", "0px");
+  await expect(
+    page.getByRole("button", { name: "開啟主辦方控制面板" }),
+  ).toHaveAttribute("aria-expanded", "false");
+
+  await page
+    .getByRole("button", { name: "開啟主辦方控制面板" })
+    .click();
+  await expect(page.locator("#app")).not.toHaveClass(/host-panel-closed/);
+  await expect(page.locator(".host-viewport")).toHaveCSS("right", "276px");
+  await expect(
+    page.getByRole("button", { name: "收起主辦方控制面板" }),
+  ).toHaveAttribute("aria-expanded", "true");
+});
+
 /** 輪詢直到某玩家標籤跟參考點的螢幕距離符合預期關係，抵銷背景分頁 rAF 降頻造成的量測時機誤差。 */
 async function pollLabelDistanceFrom(
   hostPage: Page,

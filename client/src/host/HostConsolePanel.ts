@@ -3,6 +3,7 @@ import {
   DEFAULT_ROOM_SETTINGS,
   PLAYER_MODE_OPTIONS,
   SCORE_OPTIONS,
+  START_COUNTDOWN_MS,
   type GhostState,
   type ConnectionState,
   type PlayerMode,
@@ -43,7 +44,9 @@ const PHASE_LABEL: Record<RoomPhase, string> = {
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 export class HostConsolePanel {
+  private readonly container: HTMLElement;
   private readonly root = document.createElement("aside");
+  private readonly panelToggle = document.createElement("button");
   private readonly signal = new GameStatus();
   private readonly musicRetryButton = document.createElement("button");
   private readonly phaseEl = document.createElement("span");
@@ -72,6 +75,8 @@ export class HostConsolePanel {
   private phase: RoomPhase = "WAITING";
   /** 開場運鏡＋倒數期間鎖住「開始遊戲」鈕，避免快照更新（例如有玩家加入）把它重新打開造成連點。 */
   private starting = false;
+  private panelOpen = true;
+  private countdownTimer: number | null = null;
   /** setPlayers() 每次都重建整份名單，所以「剛出局／剛抵達」的高亮要記在這裡才能撐過重建。 */
   private readonly flashing = new Map<string, "eliminated" | "finished">();
   private lastPlayers: PlayerSummary[] = [];
@@ -82,8 +87,16 @@ export class HostConsolePanel {
     joinUrl: string,
     callbacks: HostConsolePanelCallbacks,
   ) {
+    this.container = container;
     this.root.className = "host-panel";
+    this.root.id = "host-console-panel";
     this.root.setAttribute("aria-label", "主辦方控制台");
+    this.panelToggle.type = "button";
+    this.panelToggle.className = "host-panel-toggle";
+    this.panelToggle.setAttribute("aria-controls", this.root.id);
+    this.panelToggle.addEventListener("click", () =>
+      this.setPanelOpen(!this.panelOpen),
+    );
     const brand = document.createElement("div");
     brand.className = "host-brand";
     brand.innerHTML = `<span class="brand-symbol" aria-hidden="true">○ △ □</span><div><strong>123 木頭人</strong><span>主辦方控制台 · 房間 ${roomCode}</span></div>`;
@@ -280,7 +293,13 @@ export class HostConsolePanel {
     this.countdownDigit.className = "countdown-digit";
     this.countdownOverlay.appendChild(this.countdownDigit);
 
-    container.append(this.root, this.rankingOverlay, this.countdownOverlay);
+    container.append(
+      this.root,
+      this.panelToggle,
+      this.rankingOverlay,
+      this.countdownOverlay,
+    );
+    this.setPanelOpen(true);
     this.setActiveCameraMode("birdseye");
     this.setSettings(this.settings);
     this.setPhase("WAITING");
@@ -354,6 +373,18 @@ export class HostConsolePanel {
     this.updateActionButtons();
   }
 
+  private setPanelOpen(open: boolean): void {
+    this.panelOpen = open;
+    this.container.classList.toggle("host-panel-closed", !open);
+    this.panelToggle.setAttribute("aria-expanded", String(open));
+    this.panelToggle.textContent = open ? "› 收起面板" : "‹ 開啟面板";
+    this.panelToggle.setAttribute(
+      "aria-label",
+      open ? "收起主辦方控制面板" : "開啟主辦方控制面板",
+    );
+    this.panelToggle.title = open ? "收起主辦方控制面板" : "開啟主辦方控制面板";
+  }
+
   private updateActionButtons(): void {
     const phase = this.phase;
     for (const [key, button] of this.actionButtons) {
@@ -372,28 +403,37 @@ export class HostConsolePanel {
     }
   }
 
-  /** 全螢幕紅色數字倒數（3→2→1，各顯示 1 秒），倒數完呼叫 onDone——由呼叫端接著真正送出 startGame。 */
-  playCountdown(onDone: () => void): void {
+  /** 依伺服器時間渲染全螢幕紅色數字倒數，倒數完呼叫 onDone。 */
+  playCountdown(
+    startedAtServerMs: number,
+    durationMs: number,
+    nowServerMs: () => number,
+    onDone: () => void,
+  ): void {
+    if (this.countdownTimer !== null) window.clearTimeout(this.countdownTimer);
     this.countdownOverlay.hidden = false;
-    let remaining = 3;
-    const showDigit = () => {
-      this.countdownDigit.textContent = String(remaining);
-      this.countdownDigit.classList.remove("countdown-digit-pulse");
-      void this.countdownDigit.offsetWidth;
-      this.countdownDigit.classList.add("countdown-digit-pulse");
-    };
-    showDigit();
+    let previousDigit = 0;
+    const maxDigit = Math.ceil(durationMs / 1000) || START_COUNTDOWN_MS / 1000;
     const tick = () => {
-      remaining -= 1;
+      const remainingMs = startedAtServerMs + durationMs - nowServerMs();
+      const remaining = Math.ceil(Math.max(remainingMs, 0) / 1000);
       if (remaining <= 0) {
         this.countdownOverlay.hidden = true;
+        this.countdownTimer = null;
         onDone();
         return;
       }
-      showDigit();
-      window.setTimeout(tick, 1000);
+      const digit = Math.min(maxDigit, remaining);
+      if (digit !== previousDigit) {
+        previousDigit = digit;
+        this.countdownDigit.textContent = String(digit);
+        this.countdownDigit.classList.remove("countdown-digit-pulse");
+        void this.countdownDigit.offsetWidth;
+        this.countdownDigit.classList.add("countdown-digit-pulse");
+      }
+      this.countdownTimer = window.setTimeout(tick, 50);
     };
-    window.setTimeout(tick, 1000);
+    tick();
   }
 
   setPhase(phase: RoomPhase): void {
