@@ -141,33 +141,56 @@ class SfxEngine {
 export const sfx = new SfxEngine();
 
 const MUSIC_URL = new URL("../../../asserts/123木頭人.mp3", import.meta.url).href;
+const LOOKING_MUSIC_URL = new URL(
+  "../../../asserts/blanketing.mp3",
+  import.meta.url,
+).href;
+const MUSIC_FADE_MS = 300;
+
+type MusicTrackName = "away" | "looking";
+
+interface MusicTrack {
+  audio: HTMLAudioElement;
+  fadeFrame: number | null;
+}
 
 /**
  * 依伺服器廣播的鬼狀態同步主辦方端的音樂。音檔播放只負責呈現，真正的狀態切換與判定仍由伺服器控制。
  */
 export class MusicPlayer {
-  readonly audio = new Audio(MUSIC_URL);
+  private readonly tracks: Record<MusicTrackName, MusicTrack> = {
+    away: { audio: new Audio(MUSIC_URL), fadeFrame: null },
+    looking: { audio: new Audio(LOOKING_MUSIC_URL), fadeFrame: null },
+  };
+  /** 保留原本的公開音檔參照，避免既有呼叫端行為改變。 */
+  readonly audio = this.tracks.away.audio;
   private readonly onBlocked?: () => void;
-  private lastCycle = -1;
-  private lastState: GhostVisualState["state"] | null = null;
+  private activeTrack: MusicTrackName | null = null;
   private blocked = false;
-  private shouldBePlaying = false;
 
   constructor(onBlocked?: () => void) {
     this.onBlocked = onBlocked;
-    this.audio.preload = "auto";
-    this.audio.addEventListener("error", () => this.notifyBlocked());
+    for (const { audio } of Object.values(this.tracks)) {
+      audio.preload = "auto";
+      audio.addEventListener("error", () => this.notifyBlocked());
+    }
   }
 
   /** 在主辦方按下「開始遊戲」的使用者手勢中預熱音檔，降低瀏覽器自動播放被擋的機率。 */
   primeFromGesture(): void {
-    this.audio.currentTime = 0;
-    this.audio.playbackRate = 1;
-    void this.audio.play().then(() => {
-      if (this.shouldBePlaying) return;
-      this.audio.pause();
-      this.audio.currentTime = 0;
-    }).catch((error: unknown) => this.handlePlayError(error));
+    for (const name of Object.keys(this.tracks) as MusicTrackName[]) {
+      const { audio } = this.tracks[name];
+      audio.currentTime = 0;
+      audio.playbackRate = 1;
+      void audio
+        .play()
+        .then(() => {
+          if (this.activeTrack === name) return;
+          audio.pause();
+          audio.currentTime = 0;
+        })
+        .catch((error: unknown) => this.handlePlayError(error));
+    }
   }
 
   retry(): void {
@@ -176,40 +199,114 @@ export class MusicPlayer {
   }
 
   sync(ghost: GhostVisualState | null, phase: RoomPhase, nowMs: number): void {
-    if (phase !== "PLAYING" || !ghost || ghost.state !== "LOOK_AWAY") {
-      this.shouldBePlaying = false;
-      this.audio.pause();
+    const desiredTrack =
+      phase !== "PLAYING" || !ghost
+        ? null
+        : ghost.state === "LOOK_AWAY"
+          ? "away"
+          : ghost.state === "LOOKING"
+            ? "looking"
+            : null;
+
+    if (desiredTrack !== this.activeTrack) {
+      if (this.activeTrack) this.fadeTo(this.activeTrack, 0);
+      this.activeTrack = desiredTrack;
+      if (desiredTrack && ghost) this.startTrack(desiredTrack, ghost, nowMs);
+    }
+
+    if (!desiredTrack || !ghost) {
       return;
     }
-    this.shouldBePlaying = true;
 
-    const isNewCycle = ghost.musicCycle !== this.lastCycle || ghost.state !== this.lastState;
-    if (isNewCycle) {
-      this.lastCycle = ghost.musicCycle;
-      this.lastState = ghost.state;
-      this.audio.playbackRate = ghost.musicPlaybackRate;
-      this.audio.currentTime = this.expectedTime(ghost, nowMs);
-    } else {
-      const expected = this.expectedTime(ghost, nowMs);
-      if (Math.abs(this.audio.currentTime - expected) > 0.35) this.audio.currentTime = expected;
-    }
+    const track = this.tracks[desiredTrack].audio;
+    const expected =
+      desiredTrack === "away"
+        ? this.expectedTime(track, ghost, nowMs)
+        : this.expectedLookingTime(track, ghost, nowMs);
+    if (Math.abs(track.currentTime - expected) > 0.35)
+      track.currentTime = expected;
 
-    if (this.audio.paused) {
-      void this.audio.play().catch((error: unknown) => this.handlePlayError(error));
+    if (track.paused) {
+      void track.play().catch((error: unknown) => this.handlePlayError(error));
     }
   }
 
   stop(): void {
-    this.shouldBePlaying = false;
-    this.audio.pause();
-    this.audio.currentTime = 0;
-    this.lastCycle = -1;
-    this.lastState = null;
+    if (this.activeTrack) this.fadeTo(this.activeTrack, 0);
+    this.activeTrack = null;
   }
 
-  private expectedTime(ghost: GhostVisualState, nowMs: number): number {
-    const seconds = Math.max(0, nowMs - ghost.stateStartedAtMs) / 1000 * ghost.musicPlaybackRate;
-    return Number.isFinite(this.audio.duration) ? Math.min(seconds, Math.max(0, this.audio.duration - 0.02)) : seconds;
+  private startTrack(
+    name: MusicTrackName,
+    ghost: GhostVisualState,
+    nowMs: number,
+  ): void {
+    const track = this.tracks[name];
+    this.cancelFade(track);
+    track.audio.pause();
+    track.audio.volume = 0;
+    track.audio.loop = name === "looking";
+    track.audio.playbackRate = name === "away" ? ghost.musicPlaybackRate : 1;
+    track.audio.currentTime =
+      name === "away"
+        ? this.expectedTime(track.audio, ghost, nowMs)
+        : this.expectedLookingTime(track.audio, ghost, nowMs);
+    void track.audio
+      .play()
+      .catch((error: unknown) => this.handlePlayError(error));
+    this.fadeTo(name, 1);
+  }
+
+  private expectedTime(
+    audio: HTMLAudioElement,
+    ghost: GhostVisualState,
+    nowMs: number,
+  ): number {
+    const seconds =
+      (Math.max(0, nowMs - ghost.stateStartedAtMs) / 1000) *
+      ghost.musicPlaybackRate;
+    return Number.isFinite(audio.duration)
+      ? Math.min(seconds, Math.max(0, audio.duration - 0.02))
+      : seconds;
+  }
+
+  private expectedLookingTime(
+    audio: HTMLAudioElement,
+    ghost: GhostVisualState,
+    nowMs: number,
+  ): number {
+    const seconds = Math.max(0, nowMs - ghost.stateStartedAtMs) / 1000;
+    return Number.isFinite(audio.duration) && audio.duration > 0
+      ? seconds % audio.duration
+      : seconds;
+  }
+
+  private fadeTo(name: MusicTrackName, targetVolume: number): void {
+    const track = this.tracks[name];
+    this.cancelFade(track);
+    const startVolume = track.audio.volume;
+    const startedAt = performance.now();
+    const animate = (): void => {
+      const progress = Math.min(
+        1,
+        (performance.now() - startedAt) / MUSIC_FADE_MS,
+      );
+      track.audio.volume =
+        startVolume + (targetVolume - startVolume) * progress;
+      if (progress < 1) {
+        track.fadeFrame = requestAnimationFrame(animate);
+        return;
+      }
+      track.fadeFrame = null;
+      if (targetVolume === 0) track.audio.pause();
+    };
+    track.fadeFrame = requestAnimationFrame(animate);
+  }
+
+  private cancelFade(track: MusicTrack): void {
+    if (track.fadeFrame === null) return;
+    cancelAnimationFrame(track.fadeFrame);
+    track.fadeFrame = null;
   }
 
   private notifyBlocked(): void {
