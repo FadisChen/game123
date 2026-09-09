@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { createCharacter, part } from "./characterModels";
-import { barkTexture, sandTexture, skyTexture } from "./fieldTextures";
+import { barkTexture, countrysideTexture, sandTexture, skyTexture } from "./fieldTextures";
 import { replaceWithBlenderAsset } from "./blenderAssets";
 
 export const PATH_HALF_WIDTH_M = 12;
@@ -16,59 +16,110 @@ function random(seed: number): () => number {
   };
 }
 
-function wallTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = 2048;
-  canvas.height = 512;
-  const ctx = canvas.getContext("2d")!;
-  const gradient = ctx.createLinearGradient(0, 0, 0, 512);
-  gradient.addColorStop(0, "#367ac2");
-  gradient.addColorStop(0.65, "#82b9dc");
-  gradient.addColorStop(1, "#e2d6a1");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 2048, 512);
-  const rng = random(99);
-  for (let cloud = 0; cloud < 26; cloud++) {
-    const x = rng() * 2048;
-    const y = 90 + rng() * 225;
-    for (let puff = 0; puff < 12; puff++) {
-      const px = x + puff * 7;
-      const py = y + rng() * 12;
-      const radius = 8 + rng() * 14;
-      for (const wrap of [-2048, 0, 2048]) {
-        const glow = ctx.createRadialGradient(px + wrap, py, 0, px + wrap, py, radius);
-        glow.addColorStop(0, "rgba(255,255,250,.7)");
-        glow.addColorStop(0.65, "rgba(255,255,250,.4)");
-        glow.addColorStop(1, "rgba(255,255,250,0)");
-        ctx.fillStyle = glow;
-        ctx.fillRect(px + wrap - radius, py - radius, radius * 2, radius * 2);
-      }
+function wheatTuft(): THREE.BufferGeometry {
+  const pieces: THREE.BufferGeometry[] = [];
+  for (let stalk = 0; stalk < 3; stalk++) {
+    const x = (stalk - 1) * 0.11, height = 0.72 + stalk * 0.09;
+    pieces.push(new THREE.CylinderGeometry(0.009, 0.012, height, 3).translate(x, height / 2, 0));
+    for (let seed = 0; seed < 4; seed++) {
+      const grain = new THREE.SphereGeometry(1, 5, 3);
+      grain.scale(0.036, 0.066, 0.024);
+      grain.rotateZ((seed % 2 ? -1 : 1) * 0.3);
+      grain.translate(x + (seed % 2 ? -0.018 : 0.018), height + seed * 0.046, 0);
+      pieces.push(grain);
     }
+    const leaf = new THREE.ConeGeometry(0.048, 0.32, 3);
+    leaf.scale(1, 1, 0.22);
+    leaf.rotateZ(stalk % 2 ? 0.7 : -0.7);
+    leaf.translate(x + (stalk % 2 ? -0.1 : 0.1), height * 0.58, 0);
+    pieces.push(leaf);
   }
-  for (let layer = 0; layer < 3; layer++) {
-    ctx.beginPath();
-    ctx.moveTo(0, 512);
-    for (let x = 0; x <= 2048; x += 12) ctx.lineTo(x, 425 + layer * 20 - rng() * 32);
-    ctx.lineTo(2048, 512);
-    ctx.fillStyle = ["#818b64", "#6d794c", "#a7a15c"][layer];
-    ctx.fill();
+  const geometry = mergeGeometries(pieces)!;
+  pieces.forEach((piece) => piece.dispose());
+  return geometry;
+}
+
+function countrysideHeight(x: number, z: number): number {
+  return 1.8 + Math.sin(x * 0.043 + z * 0.035) * 1.1 + Math.cos(x * 0.08 - z * 0.031) * 0.8;
+}
+
+function buildCountryside(scene: THREE.Scene): void {
+  const geometry = new THREE.PlaneGeometry(230, 150, 80, 50);
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, 0, 111);
+  const positions = geometry.getAttribute("position");
+  const colors: number[] = [];
+  const color = new THREE.Color();
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i), z = positions.getZ(i);
+    const ramp = THREE.MathUtils.smoothstep(z, 36, 70);
+    const height = countrysideHeight(x, z) * ramp;
+    positions.setY(i, height - 0.03);
+    const tone = 0.84 + height * 0.025;
+    color.setRGB(tone, tone, tone * 0.94);
+    colors.push(color.r, color.g, color.b);
   }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  const hillSand = sandTexture();
+  hillSand.repeat.set(46, 30);
+  const hills = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: hillSand, vertexColors: true, roughness: 1 }));
+  hills.receiveShadow = true;
+  scene.add(hills);
+
+  // Small irregular lobes read as leafy crowns instead of oversized smooth ellipses.
+  const rng = random(261);
+  const lobes: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 15; i++) {
+    const lobe = new THREE.SphereGeometry(0.55 + rng() * 0.28, 10, 7);
+    const p = lobe.getAttribute("position");
+    for (let vertex = 0; vertex < p.count; vertex++) {
+      const x = p.getX(vertex), y = p.getY(vertex), z = p.getZ(vertex);
+      const scale = 1 + 0.08 * Math.sin(x * 23 + y * 15 + z * 32);
+      p.setXYZ(vertex, x * scale, y * scale, z * scale);
+    }
+    lobe.translate((rng() - 0.5) * 2, (rng() - 0.5) * 1.4, (rng() - 0.5) * 1.6);
+    lobe.computeVertexNormals();
+    lobes.push(lobe);
+  }
+  const crown = mergeGeometries(lobes)!;
+  lobes.forEach((lobe) => lobe.dispose());
+  const forest = new THREE.InstancedMesh(crown, new THREE.MeshStandardMaterial({ roughness: 0.95 }), 380);
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < forest.count; i++) {
+    const x = (rng() - 0.5) * 220, z = 65 + rng() * 75;
+    const scale = 0.9 + rng() * 1.1;
+    dummy.position.set(x, countrysideHeight(x, z) + scale * 0.75, z);
+    dummy.scale.set(scale, scale * (0.8 + rng() * 0.3), scale);
+    dummy.rotation.y = rng() * Math.PI * 2;
+    dummy.updateMatrix(); forest.setMatrixAt(i, dummy.matrix);
+    color.setHSL(0.19 + rng() * 0.045, 0.32 + rng() * 0.15, 0.26 + rng() * 0.13).convertSRGBToLinear();
+    forest.setColorAt(i, color);
+  }
+  scene.add(forest);
 }
 
 /** 玩家與主辦方共用完整競技場，位置及比例保持一致。 */
 export function buildFieldEnvironment(scene: THREE.Scene): void {
   const sand = sandTexture();
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), new THREE.MeshStandardMaterial({ map: sand, roughness: 1, bumpMap: sand, bumpScale: 0.055 }));
+  const groundGeometry = new THREE.PlaneGeometry(240, 240, 96, 96);
+  const positions = groundGeometry.getAttribute("position");
+  const groundColors: number[] = [];
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i), y = positions.getY(i);
+    const tone = 0.91 + Math.sin(x * 0.27 + Math.cos(y * 0.19)) * 0.035 + Math.cos(y * 0.39 + x * 0.11) * 0.025;
+    groundColors.push(tone, tone, tone);
+  }
+  groundGeometry.setAttribute("color", new THREE.Float32BufferAttribute(groundColors, 3));
+  const ground = new THREE.Mesh(groundGeometry, new THREE.MeshStandardMaterial({ map: sand, vertexColors: true, roughness: 0.94, bumpMap: sand, bumpScale: 0.024 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, -0.02, 20);
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const sky = wallTexture();
-  scene.background = skyTexture();
+  const sky = countrysideTexture();
+  scene.background = scene.environment = skyTexture();
+  scene.environmentIntensity = 0.25;
 
   for (const side of [-1, 1]) {
     const wallX = side * FIELD_HALF_WIDTH_M;
@@ -96,36 +147,27 @@ export function buildFieldEnvironment(scene: THREE.Scene): void {
   }
 
   const rng = random(37);
-  const wheatCount = 10000;
-  const wheat = new THREE.InstancedMesh(new THREE.ConeGeometry(0.08, 0.8, 3), new THREE.MeshStandardMaterial({ color: 0xcaa345, roughness: 1 }), wheatCount);
+  const wheatCount = 6500;
+  const wheat = new THREE.InstancedMesh(wheatTuft(), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), wheatCount);
   const dummy = new THREE.Object3D();
+  const wheatColor = new THREE.Color();
   for (let i = 0; i < wheatCount; i++) {
     const side = i % 2 ? 1 : -1;
-    dummy.position.set(side * (19 + rng() * 48), 0.35, -15 + rng() * 90);
-    if (i % 2 === 0) dummy.position.set((rng() - 0.5) * 100, 0.45, 36 + rng() * 18);
+    dummy.position.set(side * (19 + rng() * 48), 0, -15 + rng() * 50);
+    if (i % 2 === 0) {
+      const x = (rng() - 0.5) * 110, z = 36 + rng() * 27;
+      dummy.position.set(x, countrysideHeight(x, z) * THREE.MathUtils.smoothstep(z, 36, 70), z);
+    }
     dummy.rotation.set(rng() * 0.2, rng() * 6, rng() * 0.15);
     dummy.scale.setScalar(0.7 + rng() * 0.8);
     dummy.updateMatrix();
     wheat.setMatrixAt(i, dummy.matrix);
+    wheatColor.setHSL(0.115 + rng() * 0.025, 0.55 + rng() * 0.15, 0.4 + rng() * 0.16).convertSRGBToLinear();
+    wheat.setColorAt(i, wheatColor);
   }
+  wheat.receiveShadow = true;
   scene.add(wheat);
-  {
-    // 一個 instanced mesh 疊出遠景樹冠，避免大量獨立物件的繪製成本。
-    const foliage = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), new THREE.MeshStandardMaterial({ roughness: 1 }), 750);
-    const color = new THREE.Color();
-    for (let i = 0; i < 750; i++) {
-      const tree = Math.floor(i / 5);
-      const x = (tree / 150 - 0.5) * 200;
-      const z = 58 + rng() * 22;
-      dummy.position.set(x + (rng() - 0.5) * 3, 1.8 + rng() * 4, z);
-      dummy.scale.set(0.8 + rng() * 1.5, 0.8 + rng() * 0.9, 0.8 + rng() * 1.5);
-      dummy.updateMatrix();
-      foliage.setMatrixAt(i, dummy.matrix);
-      color.setHex([0x526136, 0x677540, 0x7b8348, 0x948a45, 0x465731][i % 5]);
-      foliage.setColorAt(i, color);
-    }
-    scene.add(foliage);
-  }
+  buildCountryside(scene);
 
 }
 
@@ -192,17 +234,18 @@ function buildHouse(scene: THREE.Scene, x: number): void {
 
 export function lightScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
   scene.background = new THREE.Color(0x74acd5);
-  scene.fog = new THREE.Fog(0xc7d3bc, 80, 180);
+  scene.fog = new THREE.Fog(0xc5d6c5, 95, 200);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  scene.add(new THREE.HemisphereLight(0xe2eeff, 0xa69161, 1.6));
-  const sun = new THREE.DirectionalLight(0xffecd0, 2.4);
-  sun.position.set(-12, 20, -8);
+  scene.add(new THREE.HemisphereLight(0xe4f0ff, 0xb6a17b, 1.8));
+  const sun = new THREE.DirectionalLight(0xffebce, 3);
+  sun.position.set(-18, 28, -6);
   sun.target.position.set(0, 0, 15);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  const shadowSize = Math.min(4096, renderer.capabilities.maxTextureSize);
+  sun.shadow.mapSize.set(shadowSize, shadowSize);
   Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 32, bottom: -24, near: 0.5, far: 100 });
   sun.shadow.normalBias = 0.018;
   sun.shadow.bias = -0.0001;

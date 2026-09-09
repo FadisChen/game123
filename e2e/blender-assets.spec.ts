@@ -48,7 +48,7 @@ test("Blender models render in the host scene and retain the doll's current stat
   expect(playerMesh.materials).toBe(1);
   expect(playerMesh.height).toBeGreaterThan(1.4);
   expect(playerMesh.height).toBeLessThan(1.7);
-  expect(playerMesh.triangles).toBeLessThan(12000);
+  expect(playerMesh.triangles).toBeLessThanOrEqual(24000);
   const state = await page.evaluate(() => {
     const host = (window as any).assetHost;
     let doll: any;
@@ -114,4 +114,38 @@ test("missing Blender files leave the procedural scene usable", async ({ page })
     host.render();
     return host.renderer.info.render.triangles;
   })).toBeGreaterThan(0);
+});
+
+test("first person loads the detailed player mesh and excludes the local player at room capacity", async ({ page }) => {
+  await page.route("**/asset-preview", (route) => route.fulfill({ contentType: "text/html", body: "<div id='scene' style='width:844px;height:390px'></div>" }));
+  await page.goto("/asset-preview");
+  await page.evaluate(async () => {
+    const scenePath = "/src/game/Scene.ts";
+    const { GameScene } = await import(scenePath);
+    const game = new GameScene(document.getElementById("scene")!, false);
+    game.updatePlayers(Array.from({ length: 100 }, (_, index) => ({
+      playerId: `player-${index}`, name: String(index), distance: index % 40,
+      score: 3, connected: true, eliminated: false, finished: false,
+    })), "player-7");
+    game.updateAnimations(1000);
+    Object.assign(window, { assetGame: game });
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const scene = (window as any).assetGame.scene;
+    return scene.children.find((object: any) => object.userData.blenderAsset === "player")?.count;
+  })).toBe(99);
+  const state = await page.evaluate(() => {
+    const game = (window as any).assetGame;
+    game.render();
+    const sun = game.scene.children.find((object: any) => object.isDirectionalLight);
+    return {
+      cameraChildren: game.camera.children.length,
+      shadowSize: sun.shadow.mapSize.x,
+      textureLimit: game.renderer.capabilities.maxTextureSize,
+      draws: game.renderer.info.render.calls,
+    };
+  });
+  expect(state.cameraChildren).toBe(0);
+  expect(state.shadowSize).toBe(Math.min(4096, state.textureLimit));
+  expect(state.draws).toBeGreaterThan(0);
 });

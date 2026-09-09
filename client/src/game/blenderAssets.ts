@@ -35,7 +35,8 @@ export async function replaceWithBlenderAsset(
     const model = (await loadAsset(name)).clone(true);
     model.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
-      object.castShadow = object.receiveShadow = true;
+      object.castShadow = true;
+      object.receiveShadow = name === "house" || name === "tree";
       // Each doll owns its emissive state, including when scenes coexist.
       object.material = Array.isArray(object.material)
         ? object.material.map((material) => material.clone())

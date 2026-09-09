@@ -107,11 +107,12 @@ export class PlayerAvatars {
   constructor(scene: THREE.Scene, options: PlayerAvatarOptions = {}) {
     this.scene = scene;
     this.showNames = options.showNames ?? false;
-    this.mesh = new THREE.InstancedMesh(createPlayerGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), MAX_PLAYERS_PER_ROOM);
+    this.mesh = new THREE.InstancedMesh(createPlayerGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.66 }), MAX_PLAYERS_PER_ROOM);
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = true;
-    this.mesh.receiveShadow = true;
+    // Baked contact shading avoids jagged self-shadows on the small curved faces.
+    this.mesh.receiveShadow = false;
     scene.add(this.mesh);
     void loadBlenderPlayerGeometry().then((geometry) => {
       this.mesh.geometry.dispose();
@@ -190,7 +191,7 @@ export class PlayerAvatars {
 
       const number = this.numbers.get(playerId);
       if (number) {
-        number.position.set(0, 0.76, -0.217).applyMatrix4(this.dummy.matrix);
+        number.position.set(0, this.mesh.userData.blenderAsset ? 0.66 : 0.76, -0.225).applyMatrix4(this.dummy.matrix);
         number.rotation.set(this.dummy.rotation.x, Math.PI, -this.dummy.rotation.z);
         number.visible = !state.eliminated;
       }
