@@ -3,6 +3,7 @@ import {
   FINAL_SPRINT_REMAINING_M,
   FINISH_DISTANCE_M,
   GhostReplicaAI,
+  HIT_LOCKOUT_MS,
   type Foot,
   type PlayerMode,
   type PlayerSummary,
@@ -103,7 +104,9 @@ export class NetworkedGameController {
     this.gameOver.hide();
 
     this.wireSocketEvents();
-    this.socketClient.onConnectionState((state) => this.setConnectionState(state));
+    this.socketClient.onConnectionState((state) =>
+      this.setConnectionState(state),
+    );
     this.socketClient.onReconnect(() => void this.resumeSession());
     this.applySnapshot(initialSnapshot);
     container.classList.remove("portrait-setup");
@@ -124,10 +127,8 @@ export class NetworkedGameController {
     this.socketClient.onStartCountdown((payload) => {
       if (this.serverPhase !== "WAITING") return;
       this.clock.updateFromServerNow(payload.serverNowMs);
-      this.startCountdown.play(
-        payload.serverNowMs,
-        payload.durationMs,
-        () => this.clock.nowServerMs(),
+      this.startCountdown.play(payload.serverNowMs, payload.durationMs, () =>
+        this.clock.nowServerMs(),
       );
     });
 
@@ -245,7 +246,10 @@ export class NetworkedGameController {
     if (modeChanged) {
       this.applyMotionAvailability(false);
       // 先讓直向玩家按下教學確認，才能請求裝置感應權限。
-      this.container.classList.toggle("motion-permission-pending", this.playerMode === "motion");
+      this.container.classList.toggle(
+        "motion-permission-pending",
+        this.playerMode === "motion",
+      );
     }
   }
 
@@ -273,7 +277,9 @@ export class NetworkedGameController {
       this.teaching.setVisible(false);
       this.gameOver.hide();
       this.waiting.setMessage(
-        this.connectionState === "reconnecting" ? "重新連線中…" : "連線已中斷，正在嘗試重新連線…",
+        this.connectionState === "reconnecting"
+          ? "重新連線中…"
+          : "連線已中斷，正在嘗試重新連線…",
       );
       this.waiting.setVisible(true);
       return;
@@ -397,6 +403,8 @@ export class NetworkedGameController {
           this.hud.showOutcomeOverlay("eliminated");
           this.scene?.playCollapse(now);
           this.syncScreensToPhase();
+        } else {
+          this.hud.showHitLock(HIT_LOCKOUT_MS);
         }
         break;
       case "advanced":
@@ -410,6 +418,8 @@ export class NetworkedGameController {
           this.hud.showOutcomeOverlay("finished");
           this.syncScreensToPhase();
         }
+        break;
+      case "locked":
         break;
     }
   }

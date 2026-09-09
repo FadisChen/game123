@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_ROOM_SETTINGS,
   GHOST_TURN_DURATION_MS,
+  HIT_LOCKOUT_MS,
   MAX_GAME_DURATION_MS,
   MUSIC_LOOKING_MIN_MS,
   MUSIC_TRACK_DURATION_MS,
@@ -46,7 +47,10 @@ function noFakeTurnRng(): () => number {
 }
 
 /** 把一個房間走到剛進入 PLAYING 的那一刻（now=0，鬼的第一次 LOOK_AWAY 才剛開始），回傳該房間。 */
-function roomJustStartedPlaying(rng: () => number, boostRng: () => number): GameRoom {
+function roomJustStartedPlaying(
+  rng: () => number,
+  boostRng: () => number,
+): GameRoom {
   const room = new GameRoom("AB12", "host1", rng, boostRng);
   room.join("p1", "Alice");
   room.startGame(0);
@@ -58,7 +62,11 @@ function roomJustStartedPlaying(rng: () => number, boostRng: () => number): Game
  * （update() 每次呼叫最多只追上一次轉換，中間的時間點一定要一步一步 tick 過，否則會在檢查點當下
  * 補一次遲到的轉換。）加速測試另外用 boostEventsOnly() 濾掉鬼的事件。
  */
-function roomSettledIntoPlaying(rng: () => number, boostRng: () => number, extraPlayerIds: string[] = []): GameRoom {
+function roomSettledIntoPlaying(
+  rng: () => number,
+  boostRng: () => number,
+  extraPlayerIds: string[] = [],
+): GameRoom {
   const room = new GameRoom("AB12", "host1", rng, boostRng);
   room.join("p1", "Alice");
   for (const id of extraPlayerIds) room.join(id, id);
@@ -86,9 +94,15 @@ test("join rejects new players after the game has started, but reconnect (same i
 test("name validation: length and case-insensitive uniqueness", () => {
   const room = new GameRoom("AB12", "host1");
   assert.deepEqual(room.join("p1", ""), { ok: false, error: "NAME_INVALID" });
-  assert.deepEqual(room.join("p1", "12345678901"), { ok: false, error: "NAME_INVALID" });
+  assert.deepEqual(room.join("p1", "12345678901"), {
+    ok: false,
+    error: "NAME_INVALID",
+  });
   assert.deepEqual(room.join("p1", "Alice"), { ok: true });
-  assert.deepEqual(room.join("p2", "ALICE"), { ok: false, error: "NAME_TAKEN" });
+  assert.deepEqual(room.join("p2", "ALICE"), {
+    ok: false,
+    error: "NAME_TAKEN",
+  });
   assert.deepEqual(room.join("p2", "Bob"), { ok: true });
 });
 
@@ -97,7 +111,10 @@ test("room full rejects joins beyond the max player cap", () => {
   for (let i = 0; i < 100; i++) {
     assert.deepEqual(room.join(`p${i}`, `n${i}`), { ok: true });
   }
-  assert.deepEqual(room.join("overflow", "Overflow"), { ok: false, error: "ROOM_FULL" });
+  assert.deepEqual(room.join("overflow", "Overflow"), {
+    ok: false,
+    error: "ROOM_FULL",
+  });
 });
 
 test("starting a room enters PLAYING immediately and creates the first music cycle", () => {
@@ -117,15 +134,85 @@ test("a step during the LOOKING window is judged as caught, driven purely by tic
   room.tick(PLAYING_STARTS_AT); // now PLAYING, ghost LOOK_AWAY starts here
 
   assert.deepEqual(room.tick(LOOK_AWAY_1_END), [{ type: "ghostStateChanged" }]); // -> TURNING_TO_LOOK
-  assert.deepEqual(room.tick(TURNING_TO_LOOK_END), [{ type: "ghostStateChanged" }]); // -> LOOKING
+  assert.deepEqual(room.tick(TURNING_TO_LOOK_END), [
+    { type: "ghostStateChanged" },
+  ]); // -> LOOKING
   assert.equal(room.ghost?.getState(), "LOOKING");
 
   const outcome = room.applyStep("p1", "left", TURNING_TO_LOOK_END + 100);
   assert.ok(outcome.ok);
   if (outcome.ok) {
-    assert.deepEqual(outcome.result, { kind: "caught", scoreAfter: 2, eliminated: false });
+    assert.deepEqual(outcome.result, {
+      kind: "caught",
+      scoreAfter: 2,
+      eliminated: false,
+    });
     assert.equal(outcome.ghostChanged, false);
     assert.equal(outcome.concluded, null);
+  }
+});
+
+test("being caught starts a lockout window where further steps are ignored (no score change, no movement)", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng());
+  room.join("p1", "Alice");
+  room.startGame(0);
+  room.tick(PLAYING_STARTS_AT);
+  room.tick(LOOK_AWAY_1_END);
+  room.tick(TURNING_TO_LOOK_END); // -> LOOKING
+
+  const caughtAt = TURNING_TO_LOOK_END + 100;
+  const caught = room.applyStep("p1", "left", caughtAt);
+  assert.ok(caught.ok);
+  if (caught.ok) {
+    assert.deepEqual(caught.result, {
+      kind: "caught",
+      scoreAfter: 2,
+      eliminated: false,
+    });
+  }
+
+  // Still inside the lockout: even though the ghost is still LOOKING, the step must be ignored entirely.
+  const duringLock = room.applyStep(
+    "p1",
+    "right",
+    caughtAt + HIT_LOCKOUT_MS - 1,
+  );
+  assert.ok(duringLock.ok);
+  if (duringLock.ok) {
+    assert.deepEqual(duringLock.result, { kind: "locked", remainingMs: 1 });
+  }
+  assert.equal(room.players.get("p1")!.player.score, 2);
+  assert.equal(room.players.get("p1")!.player.distance, 0);
+
+  // Lockout has just expired: normal judging resumes, whatever the ghost happens to be doing by then.
+  const afterLock = room.applyStep("p1", "right", caughtAt + HIT_LOCKOUT_MS);
+  assert.ok(afterLock.ok);
+  if (afterLock.ok) assert.notEqual(afterLock.result.kind, "locked");
+});
+
+test("pausing and resuming shifts a pending hit-lockout so it doesn't expire early off stale wall-clock time", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng());
+  room.join("p1", "Alice");
+  room.startGame(0);
+  room.tick(PLAYING_STARTS_AT);
+  room.tick(LOOK_AWAY_1_END);
+  room.tick(TURNING_TO_LOOK_END); // -> LOOKING
+
+  const caughtAt = TURNING_TO_LOOK_END + 100;
+  room.applyStep("p1", "left", caughtAt); // starts a HIT_LOCKOUT_MS lockout
+
+  room.pause(caughtAt + 500); // only 500ms of the lockout has elapsed
+  room.resume(caughtAt + 500 + 100000); // 100000ms of "wall clock" passes while paused
+
+  // If the pause/resume shift were NOT applied, the un-shifted lockout would already be long over.
+  const immediatelyAfterResume = room.applyStep(
+    "p1",
+    "right",
+    caughtAt + 500 + 100000 + 1,
+  );
+  assert.ok(immediatelyAfterResume.ok);
+  if (immediatelyAfterResume.ok) {
+    assert.equal(immediatelyAfterResume.result.kind, "locked");
   }
 });
 
@@ -137,12 +224,33 @@ test("three catches eliminate the sole player and conclude the game as all-elimi
   room.tick(LOOK_AWAY_1_END);
   room.tick(TURNING_TO_LOOK_END); // LOOKING window now open
 
-  room.applyStep("p1", "left", TURNING_TO_LOOK_END + 100);
-  room.applyStep("p1", "right", TURNING_TO_LOOK_END + 200);
-  const third = room.applyStep("p1", "left", TURNING_TO_LOOK_END + 300);
+  // Each catch now opens a HIT_LOCKOUT_MS lockout, which outlasts the rest of that LOOKING window,
+  // so the next two catches each have to wait for the ghost to cycle all the way back to LOOKING.
+  let now = TURNING_TO_LOOK_END + 100;
+  room.applyStep("p1", "left", now);
+  const waitForNextLookingWindow = (): void => {
+    const stateBeforeWait = room.ghost?.getState();
+    do {
+      now += 100;
+      room.tick(now);
+    } while (room.ghost?.getState() === stateBeforeWait);
+    while (room.ghost?.getState() !== "LOOKING") {
+      now += 100;
+      room.tick(now);
+    }
+  };
+
+  waitForNextLookingWindow();
+  room.applyStep("p1", "right", now);
+  waitForNextLookingWindow();
+  const third = room.applyStep("p1", "left", now);
   assert.ok(third.ok);
   if (third.ok) {
-    assert.deepEqual(third.result, { kind: "caught", scoreAfter: 0, eliminated: true });
+    assert.deepEqual(third.result, {
+      kind: "caught",
+      scoreAfter: 0,
+      eliminated: true,
+    });
     assert.equal(third.concluded, "all-eliminated");
   }
   assert.equal(room.phase, "GAME_OVER");
@@ -180,7 +288,9 @@ test("the round auto-concludes once MAX_GAME_DURATION_MS is reached", () => {
   room.startGame(0);
 
   const events = room.tick(MAX_GAME_DURATION_MS);
-  assert.ok(events.some((e) => e.type === "gameOver" && e.reason === "time-limit"));
+  assert.ok(
+    events.some((e) => e.type === "gameOver" && e.reason === "time-limit"),
+  );
   assert.equal(room.phase, "GAME_OVER");
 });
 
@@ -203,7 +313,10 @@ test("restart resets a GAME_OVER room back to WAITING with scores restored", () 
 test("forceEndGame is rejected from WAITING", () => {
   const room = new GameRoom("AB12", "host1");
   room.join("p1", "Alice");
-  assert.deepEqual(room.forceEndGame(), { ok: false, error: "ROOM_NOT_ACTIVE" });
+  assert.deepEqual(room.forceEndGame(), {
+    ok: false,
+    error: "ROOM_NOT_ACTIVE",
+  });
 });
 
 test("a disconnected player is preserved during the grace window, then marked timed-out and eliminated", () => {
@@ -213,23 +326,45 @@ test("a disconnected player is preserved during the grace window, then marked ti
 
   assert.deepEqual(room.tick(RECONNECT_GRACE_MS - 1), []);
   assert.equal(room.toSnapshot(0).players[0].connected, false);
-  assert.equal(room.toSnapshot(0).players[0].disconnectedPermanently, undefined);
+  assert.equal(
+    room.toSnapshot(0).players[0].disconnectedPermanently,
+    undefined,
+  );
 
   const events = room.tick(RECONNECT_GRACE_MS);
-  assert.deepEqual(events, [{ type: "playerConnectionChanged", playerId: "p1", connected: false, timedOut: true }]);
+  assert.deepEqual(events, [
+    {
+      type: "playerConnectionChanged",
+      playerId: "p1",
+      connected: false,
+      timedOut: true,
+    },
+  ]);
   assert.equal(room.toSnapshot(0).players[0].disconnectedPermanently, true);
 });
 
 test("isAbandoned is true only once both the host and every player are disconnected", () => {
   const room = new GameRoom("AB12", "host1");
   room.join("p1", "Alice");
-  assert.equal(room.isAbandoned(), false, "a connected player keeps the room alive even with no host socket");
+  assert.equal(
+    room.isAbandoned(),
+    false,
+    "a connected player keeps the room alive even with no host socket",
+  );
 
   room.markPlayerDisconnected("p1", 0);
-  assert.equal(room.isAbandoned(), true, "no connected players and no host socket means abandoned");
+  assert.equal(
+    room.isAbandoned(),
+    true,
+    "no connected players and no host socket means abandoned",
+  );
 
   room.attachHostSocket("host-socket-1");
-  assert.equal(room.isAbandoned(), false, "an attached host socket keeps the room alive");
+  assert.equal(
+    room.isAbandoned(),
+    false,
+    "an attached host socket keeps the room alive",
+  );
 });
 
 // ---------- PRD 22.2 隨機加速 ----------
@@ -241,13 +376,20 @@ test("a winning boost roll activates a window, and it later expires on its own t
   const activateEvents = boostEventsOnly(room.tick(firstRollAt));
   assert.deepEqual(activateEvents, [
     { type: "playerBoostChanged", playerId: "p1", boosted: false },
-    { type: "playerBoostChanged", playerId: "p1", boosted: true, untilMs: firstRollAt + SPEED_BOOST_DURATION_MS },
+    {
+      type: "playerBoostChanged",
+      playerId: "p1",
+      boosted: true,
+      untilMs: firstRollAt + SPEED_BOOST_DURATION_MS,
+    },
   ]);
   assert.equal(room.toSnapshot(firstRollAt + 1).players[0].boosted, true);
 
   const expiryAt = firstRollAt + SPEED_BOOST_DURATION_MS;
   const expireEvents = boostEventsOnly(room.tick(expiryAt));
-  assert.deepEqual(expireEvents, [{ type: "playerBoostChanged", playerId: "p1", boosted: false }]);
+  assert.deepEqual(expireEvents, [
+    { type: "playerBoostChanged", playerId: "p1", boosted: false },
+  ]);
   assert.equal(room.toSnapshot(expiryAt + 1).players[0].boosted, undefined);
 });
 
@@ -296,7 +438,12 @@ test("speed boost rolls skip players who are already eliminated or finished", ()
   const events = boostEventsOnly(room.tick(firstRollAt));
   assert.deepEqual(events, [
     { type: "playerBoostChanged", playerId: "p2", boosted: false },
-    { type: "playerBoostChanged", playerId: "p2", boosted: true, untilMs: firstRollAt + SPEED_BOOST_DURATION_MS },
+    {
+      type: "playerBoostChanged",
+      playerId: "p2",
+      boosted: true,
+      untilMs: firstRollAt + SPEED_BOOST_DURATION_MS,
+    },
   ]);
 });
 
@@ -334,7 +481,13 @@ test("custom distance applies to existing players, late joins, reconnects and re
     room.applyStep(id, "left", 100);
     const result = room.applyStep(id, "right", 200);
     assert.ok(result.ok);
-    if (result.ok) assert.deepEqual(result.result, { kind: "advanced", distanceAfter: 0.5, finished: true, finishedAtMs: 200 });
+    if (result.ok)
+      assert.deepEqual(result.result, {
+        kind: "advanced",
+        distanceAfter: 0.5,
+        finished: true,
+        finishedAtMs: 200,
+      });
   }
   assert.equal(room.phase, "GAME_OVER");
   assert.ok(room.getLastRanking()!.every((entry) => entry.distance === 0.5));
@@ -345,52 +498,98 @@ test("custom distance applies to existing players, late joins, reconnects and re
   room.players.get("p1")!.player.distance = 50;
   const result = room.applyStep("p1", "left", 500);
   assert.ok(result.ok);
-  if (result.ok) assert.deepEqual(result.result, { kind: "advanced", distanceAfter: 50.32, finished: false });
+  if (result.ok)
+    assert.deepEqual(result.result, {
+      kind: "advanced",
+      distanceAfter: 50.32,
+      finished: false,
+    });
 });
 
 test("updating settings while WAITING re-configures players already in the room and those joining later", () => {
   const room = new GameRoom("AB12", "host1");
   room.join("p1", "Alice");
 
-  assert.deepEqual(room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" }), { ok: true });
+  assert.deepEqual(
+    room.updateSettings({
+      ...DEFAULT_ROOM_SETTINGS,
+      maxScore: 1,
+      playerMode: "motion",
+    }),
+    { ok: true },
+  );
   assert.equal(room.toSnapshot(0).players[0].score, 1);
 
   room.join("p2", "Bob");
   assert.equal(room.players.get("p2")!.player.score, 1);
-  assert.deepEqual(room.toSnapshot(0).settings, { ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" });
+  assert.deepEqual(room.toSnapshot(0).settings, {
+    ...DEFAULT_ROOM_SETTINGS,
+    maxScore: 1,
+    playerMode: "motion",
+  });
 });
 
 test("settings are locked once the round is under way", () => {
   const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
-  assert.deepEqual(room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" }), { ok: false, error: "ROOM_NOT_WAITING" });
-  assert.deepEqual(room.toSnapshot(PLAYING_STARTS_AT).settings, DEFAULT_ROOM_SETTINGS);
+  assert.deepEqual(
+    room.updateSettings({
+      ...DEFAULT_ROOM_SETTINGS,
+      maxScore: 1,
+      playerMode: "motion",
+    }),
+    { ok: false, error: "ROOM_NOT_WAITING" },
+  );
+  assert.deepEqual(
+    room.toSnapshot(PLAYING_STARTS_AT).settings,
+    DEFAULT_ROOM_SETTINGS,
+  );
 });
 
 test("a maxScore of 1 room eliminates a player on their first catch", () => {
   const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
   room.join("p1", "Alice");
   room.join("p2", "Bob"); // keeps the round alive after p1 is out
-  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 1, playerMode: "motion" });
+  room.updateSettings({
+    ...DEFAULT_ROOM_SETTINGS,
+    maxScore: 1,
+    playerMode: "motion",
+  });
   room.startGame(0);
-  for (const at of [PLAYING_STARTS_AT, LOOK_AWAY_1_END, TURNING_TO_LOOK_END]) room.tick(at);
+  for (const at of [PLAYING_STARTS_AT, LOOK_AWAY_1_END, TURNING_TO_LOOK_END])
+    room.tick(at);
 
   const caught = room.applyStep("p1", "left", TURNING_TO_LOOK_END + 100);
   assert.ok(caught.ok);
-  if (caught.ok) assert.deepEqual(caught.result, { kind: "caught", scoreAfter: 0, eliminated: true });
+  if (caught.ok)
+    assert.deepEqual(caught.result, {
+      kind: "caught",
+      scoreAfter: 0,
+      eliminated: true,
+    });
 });
 
 test("player mode is room-scoped and does not alter the shared ghost timings", () => {
   const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
   room.join("p1", "Alice");
-  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, maxScore: 3, playerMode: "motion" });
+  room.updateSettings({
+    ...DEFAULT_ROOM_SETTINGS,
+    maxScore: 3,
+    playerMode: "motion",
+  });
   room.startGame(0);
   room.tick(PLAYING_STARTS_AT);
-  assert.deepEqual(room.toSnapshot(0).settings, { ...DEFAULT_ROOM_SETTINGS, maxScore: 3, playerMode: "motion" });
+  assert.deepEqual(room.toSnapshot(0).settings, {
+    ...DEFAULT_ROOM_SETTINGS,
+    maxScore: 3,
+    playerMode: "motion",
+  });
   assert.equal(room.ghost!.getStateDuration(), MUSIC_TRACK_DURATION_MS);
 
   room.tick(PLAYING_STARTS_AT + MUSIC_TRACK_DURATION_MS);
   assert.equal(room.ghost!.getStateDuration(), GHOST_TURN_DURATION_MS);
-  room.tick(PLAYING_STARTS_AT + MUSIC_TRACK_DURATION_MS + GHOST_TURN_DURATION_MS);
+  room.tick(
+    PLAYING_STARTS_AT + MUSIC_TRACK_DURATION_MS + GHOST_TURN_DURATION_MS,
+  );
   assert.equal(room.ghost!.getState(), "LOOKING");
   assert.equal(room.ghost!.getStateDuration(), MUSIC_LOOKING_MIN_MS);
 });
@@ -403,10 +602,18 @@ test("session tokens resume only the matching host and player", () => {
   assert.equal(hostToken.length >= 32, true);
   assert.ok(playerToken && playerToken.length >= 32);
 
-  assert.deepEqual(room.resumeHost("wrong-token", "host-new"), { ok: false, error: "SESSION_INVALID" });
+  assert.deepEqual(room.resumeHost("wrong-token", "host-new"), {
+    ok: false,
+    error: "SESSION_INVALID",
+  });
   assert.deepEqual(room.resumeHost(hostToken, "host-new"), { ok: true });
-  assert.deepEqual(room.resumePlayer("p1", "wrong-token", "player-new"), { ok: false, error: "SESSION_INVALID" });
-  assert.deepEqual(room.resumePlayer("p1", playerToken!, "player-new"), { ok: true });
+  assert.deepEqual(room.resumePlayer("p1", "wrong-token", "player-new"), {
+    ok: false,
+    error: "SESSION_INVALID",
+  });
+  assert.deepEqual(room.resumePlayer("p1", playerToken!, "player-new"), {
+    ok: true,
+  });
   assert.equal(room.players.get("p1")?.socketId, "player-new");
 });
 
@@ -440,6 +647,9 @@ test("clientSeq makes retries idempotent and limits accepted steps per second", 
   for (let seq = 1; seq < 10; seq++) {
     assert.equal(room.applyStep("p1", "left", 300, seq).ok, true);
   }
-  assert.deepEqual(room.applyStep("p1", "right", 400, 10), { ok: false, error: "RATE_LIMITED" });
+  assert.deepEqual(room.applyStep("p1", "right", 400, 10), {
+    ok: false,
+    error: "RATE_LIMITED",
+  });
   assert.deepEqual(room.applyStep("p1", "right", 1200, 10).ok, true);
 });

@@ -29,9 +29,11 @@ export type StepErrorCode =
   | "DUPLICATE_STEP"
   | "INVALID_PAYLOAD";
 
-export type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
+export type ConnectionState =
+  "connecting" | "connected" | "reconnecting" | "disconnected";
 
-export type GameOverReason = "all-finished" | "all-eliminated" | "time-limit" | "host-ended";
+export type GameOverReason =
+  "all-finished" | "all-eliminated" | "time-limit" | "host-ended";
 
 export interface PlayerSummary {
   playerId: PlayerId;
@@ -73,13 +75,24 @@ export interface RoomStateSnapshot {
 export type StepResultMsg =
   | { kind: "rejected-no-alternate" }
   | { kind: "caught"; scoreAfter: number; eliminated: boolean }
-  | { kind: "advanced"; distanceAfter: number; finished: boolean; finishedAtMs?: number };
+  | {
+      kind: "advanced";
+      distanceAfter: number;
+      finished: boolean;
+      finishedAtMs?: number;
+    }
+  | { kind: "locked"; remainingMs: number };
 
 // ---------- Client -> Server（皆用 ack 回覆） ----------
 
 export type HostCreateRoomPayload = Record<string, never>;
 export type HostCreateRoomAck =
-  | { ok: true; roomCode: RoomCode; hostSessionToken: string; snapshot: RoomStateSnapshot }
+  | {
+      ok: true;
+      roomCode: RoomCode;
+      hostSessionToken: string;
+      snapshot: RoomStateSnapshot;
+    }
   | { ok: false; error: string };
 
 export interface HostResumeRoomPayload {
@@ -87,7 +100,12 @@ export interface HostResumeRoomPayload {
   sessionToken: string;
 }
 export type HostResumeRoomAck =
-  | { ok: true; roomCode: RoomCode; sessionToken: string; snapshot: RoomStateSnapshot }
+  | {
+      ok: true;
+      roomCode: RoomCode;
+      sessionToken: string;
+      snapshot: RoomStateSnapshot;
+    }
   | { ok: false; error: ResumeErrorCode };
 
 export type HostRoomActionPayload = Record<string, never>;
@@ -102,7 +120,12 @@ export interface PlayerJoinRoomPayload {
   name: string;
 }
 export type PlayerJoinRoomAck =
-  | { ok: true; playerId: PlayerId; playerSessionToken: string; snapshot: RoomStateSnapshot }
+  | {
+      ok: true;
+      playerId: PlayerId;
+      playerSessionToken: string;
+      snapshot: RoomStateSnapshot;
+    }
   | { ok: false; error: JoinErrorCode };
 
 export interface PlayerResumeRoomPayload {
@@ -111,14 +134,20 @@ export interface PlayerResumeRoomPayload {
   sessionToken: string;
 }
 export type PlayerResumeRoomAck =
-  | { ok: true; playerId: PlayerId; playerSessionToken: string; snapshot: RoomStateSnapshot }
+  | {
+      ok: true;
+      playerId: PlayerId;
+      playerSessionToken: string;
+      snapshot: RoomStateSnapshot;
+    }
   | { ok: false; error: ResumeErrorCode };
 
 export interface PlayerStepPayload {
   foot: Foot;
   clientSeq: number;
 }
-export type PlayerStepAck = { ok: true; result: StepResultMsg } | { ok: false; error: StepErrorCode };
+export type PlayerStepAck =
+  { ok: true; result: StepResultMsg } | { ok: false; error: StepErrorCode };
 
 // ---------- Server -> Room（廣播） ----------
 

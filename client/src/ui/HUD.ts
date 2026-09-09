@@ -1,4 +1,9 @@
-import { CAUGHT_TOAST_MS, FINISH_DISTANCE_M, INITIAL_SCORE, type PlayerSummary } from "shared";
+import {
+  CAUGHT_TOAST_MS,
+  FINISH_DISTANCE_M,
+  INITIAL_SCORE,
+  type PlayerSummary,
+} from "shared";
 
 export type ToastVariant = "warn" | "danger" | "success" | "info";
 
@@ -11,11 +16,13 @@ export class HUD {
   private readonly playersEl = document.createElement("div");
   private readonly outcomeEl = document.createElement("div");
   private readonly damageFlashEl = document.createElement("div");
+  private readonly hitLockEl = document.createElement("div");
   private readonly progressEl = document.createElement("div");
   private maxScore = INITIAL_SCORE;
   private toastTimer: number | undefined;
   private sprintBannerTimer: number | undefined;
   private damageFlashTimer: number | undefined;
+  private hitLockTimer: number | undefined;
 
   constructor(container: HTMLElement, subtitle = "") {
     this.root.className = "player-hud";
@@ -34,17 +41,31 @@ export class HUD {
     this.damageFlashEl.className = "damage-flash";
     this.damageFlashEl.setAttribute("aria-hidden", "true");
     this.damageFlashEl.hidden = true;
+    this.hitLockEl.className = "hit-lock-banner";
+    this.hitLockEl.setAttribute("role", "status");
+    this.hitLockEl.hidden = true;
     const identity = document.createElement("div");
     identity.className = "player-identity";
-    identity.innerHTML = '<span class="player-symbol" aria-hidden="true">○ △ □</span><div><strong>123 木頭人</strong><span class="player-subtitle"></span></div>';
+    identity.innerHTML =
+      '<span class="player-symbol" aria-hidden="true">○ △ □</span><div><strong>123 木頭人</strong><span class="player-subtitle"></span></div>';
     identity.querySelector(".player-subtitle")!.textContent = subtitle;
     this.progressEl.className = "course-progress";
     this.progressEl.setAttribute("role", "progressbar");
     this.progressEl.setAttribute("aria-label", "前進距離");
     this.progressEl.setAttribute("aria-valuemin", "0");
-    this.progressEl.innerHTML = '<div><span>起點</span><strong></strong><span>終點</span></div><div class="course-progress-track"><i></i></div>';
-    this.root.append(identity, this.scoreEl, this.playersEl, this.progressEl, this.toastEl, this.sprintBannerEl, this.vignetteEl, this.outcomeEl);
-    container.append(this.root, this.damageFlashEl);
+    this.progressEl.innerHTML =
+      '<div><span>起點</span><strong></strong><span>終點</span></div><div class="course-progress-track"><i></i></div>';
+    this.root.append(
+      identity,
+      this.scoreEl,
+      this.playersEl,
+      this.progressEl,
+      this.toastEl,
+      this.sprintBannerEl,
+      this.vignetteEl,
+      this.outcomeEl,
+    );
+    container.append(this.root, this.damageFlashEl, this.hitLockEl);
     this.setScore(INITIAL_SCORE);
     this.setPlayerCount(1, 1);
     this.setProgress(0);
@@ -54,15 +75,24 @@ export class HUD {
     const current = Math.min(finishDistanceM, Math.max(0, distance));
     this.progressEl.setAttribute("aria-valuenow", String(current));
     this.progressEl.setAttribute("aria-valuemax", String(finishDistanceM));
-    this.progressEl.querySelector("strong")!.textContent = `距終點 ${(finishDistanceM - current).toFixed(1)} m`;
-    this.progressEl.style.setProperty("--progress", `${current / finishDistanceM * 100}%`);
+    this.progressEl.querySelector("strong")!.textContent =
+      `距終點 ${(finishDistanceM - current).toFixed(1)} m`;
+    this.progressEl.style.setProperty(
+      "--progress",
+      `${(current / finishDistanceM) * 100}%`,
+    );
   }
 
   /** maxScore 決定要畫幾格愛心；主辦方可以每場調整（1~3）。 */
   setScore(score: number, maxScore = this.maxScore): void {
     this.maxScore = maxScore;
-    this.scoreEl.textContent = Array.from({ length: maxScore }, (_, i) => i < score ? "♥" : "♡").join(" ");
-    this.scoreEl.setAttribute("aria-label", `剩餘 ${score} 分，共 ${maxScore} 分`);
+    this.scoreEl.textContent = Array.from({ length: maxScore }, (_, i) =>
+      i < score ? "♥" : "♡",
+    ).join(" ");
+    this.scoreEl.setAttribute(
+      "aria-label",
+      `剩餘 ${score} 分，共 ${maxScore} 分`,
+    );
   }
 
   /**
@@ -95,11 +125,37 @@ export class HUD {
 
   /** 感應模式不顯示紅光，但保留裝置支援時的觸覺提示。 */
   vibrateDamage(): void {
-    navigator.vibrate?.(60);
+    navigator.vibrate?.([70, 50, 70, 50, 70]);
+  }
+
+  /**
+   * 中槍後「聖人模式」保護期倒數（3…2…1）。獨立於 HUD，感應模式隱藏 HUD 時仍可看見，
+   * 因為保護期期間玩家踩了按鈕/晃動也不會有反應，需要文字說明原因。
+   */
+  showHitLock(durationMs: number): void {
+    window.clearInterval(this.hitLockTimer);
+    const endAt = performance.now() + durationMs;
+    this.hitLockEl.hidden = false;
+    const tick = (): void => {
+      const remainingSeconds = Math.ceil(
+        Math.max(0, endAt - performance.now()) / 1000,
+      );
+      if (remainingSeconds <= 0) {
+        this.hitLockEl.hidden = true;
+        window.clearInterval(this.hitLockTimer);
+        return;
+      }
+      this.hitLockEl.textContent = `聖人模式 ${remainingSeconds}`;
+    };
+    tick();
+    this.hitLockTimer = window.setInterval(tick, 200);
   }
 
   setPlayers(players: PlayerSummary[]): void {
-    this.setPlayerCount(players.filter((player) => !player.eliminated).length, players.length);
+    this.setPlayerCount(
+      players.filter((player) => !player.eliminated).length,
+      players.length,
+    );
   }
 
   setPlayerCount(alive: number, total: number): void {
@@ -111,14 +167,18 @@ export class HUD {
     this.toastEl.textContent = message;
     this.toastEl.hidden = false;
     window.clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => { this.toastEl.hidden = true; }, CAUGHT_TOAST_MS);
+    this.toastTimer = window.setTimeout(() => {
+      this.toastEl.hidden = true;
+    }, CAUGHT_TOAST_MS);
   }
 
   showFinalSprintBanner(text: string): void {
     this.sprintBannerEl.textContent = text;
     this.sprintBannerEl.hidden = false;
     window.clearTimeout(this.sprintBannerTimer);
-    this.sprintBannerTimer = window.setTimeout(() => { this.sprintBannerEl.hidden = true; }, 2000);
+    this.sprintBannerTimer = window.setTimeout(() => {
+      this.sprintBannerEl.hidden = true;
+    }, 2000);
     this.vignetteEl.hidden = false;
     this.vignetteEl.classList.add("final-sprint-vignette");
   }
@@ -130,5 +190,7 @@ export class HUD {
     this.vignetteEl.classList.remove("final-sprint-vignette");
   }
 
-  setVisible(visible: boolean): void { this.root.hidden = !visible; }
+  setVisible(visible: boolean): void {
+    this.root.hidden = !visible;
+  }
 }

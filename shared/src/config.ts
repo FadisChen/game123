@@ -10,18 +10,35 @@ export interface RoomSettings {
 }
 
 export const SCORE_OPTIONS = [1, 2, 3] as const;
-export const PLAYER_MODE_OPTIONS = ["main", "motion"] as const satisfies readonly PlayerMode[];
-export const FINISH_DISTANCE_M = 50;
-export const DEFAULT_ROOM_SETTINGS: RoomSettings = { maxScore: 3, playerMode: "main", finishDistanceM: FINISH_DISTANCE_M };
+export const PLAYER_MODE_OPTIONS = [
+  "main",
+  "motion",
+] as const satisfies readonly PlayerMode[];
+export const FINISH_DISTANCE_M = 30;
+export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
+  maxScore: 3,
+  playerMode: "main",
+  finishDistanceM: FINISH_DISTANCE_M,
+};
 
 /** 主辦方送來的設定不可信（可能來自竄改過的 client），超出允許範圍一律退回預設值。 */
 export function normalizeRoomSettings(input: unknown): RoomSettings {
   const raw = (input ?? {}) as Partial<RoomSettings>;
-  const distance = typeof raw.finishDistanceM === "number" ? Math.round(raw.finishDistanceM * 10) / 10 : NaN;
+  const distance =
+    typeof raw.finishDistanceM === "number"
+      ? Math.round(raw.finishDistanceM * 10) / 10
+      : NaN;
   return {
-    maxScore: SCORE_OPTIONS.find((option) => option === raw.maxScore) ?? DEFAULT_ROOM_SETTINGS.maxScore,
-    playerMode: PLAYER_MODE_OPTIONS.find((option) => option === raw.playerMode) ?? DEFAULT_ROOM_SETTINGS.playerMode,
-    finishDistanceM: Number.isFinite(distance) && distance >= 0.1 ? distance : FINISH_DISTANCE_M,
+    maxScore:
+      SCORE_OPTIONS.find((option) => option === raw.maxScore) ??
+      DEFAULT_ROOM_SETTINGS.maxScore,
+    playerMode:
+      PLAYER_MODE_OPTIONS.find((option) => option === raw.playerMode) ??
+      DEFAULT_ROOM_SETTINGS.playerMode,
+    finishDistanceM:
+      Number.isFinite(distance) && distance >= 0.1
+        ? distance
+        : FINISH_DISTANCE_M,
   };
 }
 
@@ -41,7 +58,8 @@ export const MUSIC_LOOKING_MAX_MS = 6000;
 export const GHOST_TURN_DURATION_MS = 260;
 
 export function musicPlaybackRate(cycle: number): number {
-  const steppedRate = MUSIC_INITIAL_PLAYBACK_RATE + Math.max(0, cycle) * MUSIC_PLAYBACK_RATE_STEP;
+  const steppedRate =
+    MUSIC_INITIAL_PLAYBACK_RATE + Math.max(0, cycle) * MUSIC_PLAYBACK_RATE_STEP;
   return Math.min(Math.round(steppedRate * 10) / 10, MUSIC_MAX_PLAYBACK_RATE);
 }
 
@@ -57,6 +75,9 @@ export const SPEED_BOOST_CHECK_INTERVAL_MS = 8000;
 export const SPEED_BOOST_CHANCE = 0.2;
 export const SPEED_BOOST_DURATION_MS = 4000;
 export const SPEED_BOOST_MULTIPLIER = 1.5;
+
+// 中槍後的「聖人模式」保護期：這段時間內不可前進、也不會再被扣血
+export const HIT_LOCKOUT_MS = 3000;
 
 // Phase 2：多人連線相關參數
 export const MAX_GAME_DURATION_MS = 4 * 60_000; // PRD 23.6 建議 3~5 分鐘
@@ -87,4 +108,6 @@ export const COLORS = {
 } as const;
 
 // 玩家在主辦方鳥瞰畫面上的車道顏色變體（PRD 9 章色彩參考／角色顏色變體）
-export const PLAYER_LANE_COLORS = [0x118a65, 0x2f6fed, 0x8a4fd6, 0xfdd835, 0xf4a261, 0xe639e6] as const;
+export const PLAYER_LANE_COLORS = [
+  0x118a65, 0x2f6fed, 0x8a4fd6, 0xfdd835, 0xf4a261, 0xe639e6,
+] as const;

@@ -16,7 +16,9 @@ class SfxEngine {
   /** 在按下加入／開始／踏步等使用者手勢中解鎖，廣播到達時即可播放扣分音效。 */
   unlock(): void {
     const ctx = this.ensureContext();
-    void this.loadShot(ctx).catch((error: unknown) => console.warn("扣分音效載入失敗", error));
+    void this.loadShot(ctx).catch((error: unknown) =>
+      console.warn("扣分音效載入失敗", error),
+    );
   }
 
   private loadShot(ctx: AudioContext): Promise<AudioBuffer> {
@@ -26,7 +28,10 @@ class SfxEngine {
         return response.arrayBuffer();
       })
       .then((data) => ctx.decodeAudioData(data))
-      .catch((error: unknown) => { this.shotBuffer = null; throw error; });
+      .catch((error: unknown) => {
+        this.shotBuffer = null;
+        throw error;
+      });
     return this.shotBuffer;
   }
 
@@ -52,11 +57,27 @@ class SfxEngine {
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 0.5;
       this.masterGain.connect(this.ctx.destination);
+      this.watchForResume(this.ctx);
     }
     if (this.ctx.state === "suspended") {
       void this.ctx.resume();
     }
     return this.ctx;
+  }
+
+  /**
+   * 感應模式的踏步事件來自 devicemotion，瀏覽器不認得那是「使用者手勢」，
+   * 所以 AudioContext 一旦在背景/螢幕變暗時被系統掛起，之後就沒有動作能重新解鎖它。
+   * 補上「分頁重新可見／取得焦點」時嘗試 resume，降低感應模式全程沒有中槍音效的機率。
+   */
+  private watchForResume(ctx: AudioContext): void {
+    const tryResume = (): void => {
+      if (ctx.state === "suspended") void ctx.resume();
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") tryResume();
+    });
+    window.addEventListener("focus", tryResume);
   }
 
   private getNoiseBuffer(ctx: AudioContext): AudioBuffer {
@@ -82,7 +103,8 @@ class SfxEngine {
     const osc = ctx.createOscillator();
     osc.type = type;
     osc.frequency.setValueAtTime(freqStart, startTime);
-    if (freqEnd !== freqStart) osc.frequency.linearRampToValueAtTime(freqEnd, startTime + duration);
+    if (freqEnd !== freqStart)
+      osc.frequency.linearRampToValueAtTime(freqEnd, startTime + duration);
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, startTime);
@@ -94,7 +116,13 @@ class SfxEngine {
     osc.stop(startTime + duration + 0.02);
   }
 
-  private noiseBurst(ctx: AudioContext, startTime: number, duration: number, peakGain: number, lowpassHz: number): void {
+  private noiseBurst(
+    ctx: AudioContext,
+    startTime: number,
+    duration: number,
+    peakGain: number,
+    lowpassHz: number,
+  ): void {
     const src = ctx.createBufferSource();
     src.buffer = this.getNoiseBuffer(ctx);
     const filter = ctx.createBiquadFilter();
@@ -140,9 +168,10 @@ class SfxEngine {
 
 export const sfx = new SfxEngine();
 
-const MUSIC_URL = new URL("../../../asserts/123木頭人.mp3", import.meta.url).href;
+const MUSIC_URL = new URL("../../../asserts/123木頭人.mp3", import.meta.url)
+  .href;
 const LOOKING_MUSIC_URL = new URL(
-  "../../../asserts/blanketing.mp3",
+  "../../../asserts/sleeping_wave.mp3",
   import.meta.url,
 ).href;
 const MUSIC_FADE_MS = 300;
@@ -245,7 +274,7 @@ export class MusicPlayer {
     this.cancelFade(track);
     track.audio.pause();
     track.audio.volume = 0;
-    track.audio.loop = name === "looking";
+    track.audio.loop = false;
     track.audio.playbackRate = name === "away" ? ghost.musicPlaybackRate : 1;
     track.audio.currentTime =
       name === "away"

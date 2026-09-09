@@ -322,6 +322,25 @@ kbd {
 .damage-flash-active {
   animation: damage-flash 500ms ease-out forwards;
 }
+.hit-lock-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 16;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: #1c2a22e0;
+  color: #a0edc3;
+  font-size: clamp(18px, 4vw, 26px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hit-lock-banner[hidden] {
+  display: none;
+}
 @keyframes damage-flash {
   0% {
     background: #f9414400;

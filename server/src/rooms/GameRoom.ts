@@ -1,6 +1,7 @@
 import {
   DEFAULT_ROOM_SETTINGS,
   GhostAI,
+  HIT_LOCKOUT_MS,
   MAX_STEP_EVENTS_PER_WINDOW,
   MAX_GAME_DURATION_MS,
   MAX_PLAYERS_PER_ROOM,
@@ -45,6 +46,8 @@ export interface ServerPlayerState {
   /** 隨機加速排程（PRD 22.2）：下次檢定時間、以及目前加速視窗的到期時間（null＝未加速）。 */
   nextBoostRollAt: number;
   boostActiveUntil: number | null;
+  /** 中槍後的「聖人模式」保護期到期時間（null＝目前沒有保護期）。 */
+  hitLockedUntil: number | null;
   lastClientSeq: number;
   lastStepResult: { clientSeq: number; result: StepResultMsg } | null;
   stepWindowStartedAt: number;
@@ -55,11 +58,24 @@ export type RoomEvent =
   | { type: "phaseChanged" }
   | { type: "ghostStateChanged" }
   | { type: "gameOver"; reason: GameOverReason }
-  | { type: "playerConnectionChanged"; playerId: string; connected: boolean; timedOut?: boolean }
-  | { type: "playerBoostChanged"; playerId: string; boosted: boolean; untilMs?: number };
+  | {
+      type: "playerConnectionChanged";
+      playerId: string;
+      connected: boolean;
+      timedOut?: boolean;
+    }
+  | {
+      type: "playerBoostChanged";
+      playerId: string;
+      boosted: boolean;
+      untilMs?: number;
+    };
 
 function toStepResultMsg(
-  result: { kind: "rejected-no-alternate" } | { kind: "caught"; scoreAfter: number; eliminated: boolean } | { kind: "advanced"; distanceAfter: number; finished: boolean },
+  result:
+    | { kind: "rejected-no-alternate" }
+    | { kind: "caught"; scoreAfter: number; eliminated: boolean }
+    | { kind: "advanced"; distanceAfter: number; finished: boolean },
   finishedAtMs: number | undefined,
 ): StepResultMsg {
   if (result.kind === "advanced" && result.finished) {
@@ -97,7 +113,12 @@ export class GameRoom {
   private readonly boostRng: () => number;
 
   /** boostRng 跟鬼的 rng 分開，兩個系統的隨機性互不干擾，也讓各自的單元測試好寫。 */
-  constructor(code: string, hostId: string, rng: () => number = Math.random, boostRng: () => number = Math.random) {
+  constructor(
+    code: string,
+    hostId: string,
+    rng: () => number = Math.random,
+    boostRng: () => number = Math.random,
+  ) {
     this.code = code;
     this.hostId = hostId;
     this.rng = rng;
@@ -108,20 +129,31 @@ export class GameRoom {
    * 主辦方調整這一場的血量、玩家玩法與終點距離。只在 WAITING 階段開放：開打後才換數值會讓已經扣過血的玩家
    * 跟後來的判定基準不一致。套用後把已在房裡的玩家一併重設，確保所有人起始血量相同。
    */
-  updateSettings(settings: RoomSettings): { ok: true } | { ok: false; error: string } {
-    if (this.phase !== "WAITING") return { ok: false, error: "ROOM_NOT_WAITING" };
+  updateSettings(
+    settings: RoomSettings,
+  ): { ok: true } | { ok: false; error: string } {
+    if (this.phase !== "WAITING")
+      return { ok: false, error: "ROOM_NOT_WAITING" };
     this.settings = settings;
     for (const p of this.players.values()) {
-      p.player.configure(settings.maxScore, STEP_DISTANCE_M, settings.finishDistanceM);
+      p.player.configure(
+        settings.maxScore,
+        STEP_DISTANCE_M,
+        settings.finishDistanceM,
+      );
     }
     return { ok: true };
   }
 
   /** 加入或重新加入房間。同一個 playerId 已存在時一律視為重連，不受「開始後禁止加入」限制。 */
-  join(playerId: string, name: string): { ok: true } | { ok: false; error: JoinErrorCode } {
+  join(
+    playerId: string,
+    name: string,
+  ): { ok: true } | { ok: false; error: JoinErrorCode } {
     const existing = this.players.get(playerId);
     if (existing) {
-      if (existing.disconnectedPermanently) return { ok: false, error: "SESSION_INVALID" };
+      if (existing.disconnectedPermanently)
+        return { ok: false, error: "SESSION_INVALID" };
       existing.connected = true;
       existing.disconnectedAt = null;
       existing.disconnectedPermanently = false;
@@ -137,7 +169,8 @@ export class GameRoom {
     }
     const lower = trimmed.toLowerCase();
     for (const p of this.players.values()) {
-      if (p.name.toLowerCase() === lower) return { ok: false, error: "NAME_TAKEN" };
+      if (p.name.toLowerCase() === lower)
+        return { ok: false, error: "NAME_TAKEN" };
     }
     if (this.players.size >= MAX_PLAYERS_PER_ROOM) {
       return { ok: false, error: "ROOM_FULL" };
@@ -161,6 +194,7 @@ export class GameRoom {
       joinOrder: this.nextJoinOrder++,
       nextBoostRollAt: Infinity,
       boostActiveUntil: null,
+      hitLockedUntil: null,
       lastClientSeq: -1,
       lastStepResult: null,
       stepWindowStartedAt: 0,
@@ -177,8 +211,12 @@ export class GameRoom {
     return this.players.get(playerId)?.sessionToken;
   }
 
-  resumeHost(sessionToken: string, socketId: string): { ok: true } | { ok: false; error: "SESSION_INVALID" } {
-    if (sessionToken !== this.hostSessionToken) return { ok: false, error: "SESSION_INVALID" };
+  resumeHost(
+    sessionToken: string,
+    socketId: string,
+  ): { ok: true } | { ok: false; error: "SESSION_INVALID" } {
+    if (sessionToken !== this.hostSessionToken)
+      return { ok: false, error: "SESSION_INVALID" };
     this.attachHostSocket(socketId);
     return { ok: true };
   }
@@ -211,7 +249,11 @@ export class GameRoom {
     this.hostSocketId = socketId;
   }
 
-  markPlayerDisconnected(playerId: string, now: number, socketId?: string): boolean {
+  markPlayerDisconnected(
+    playerId: string,
+    now: number,
+    socketId?: string,
+  ): boolean {
     const p = this.players.get(playerId);
     if (!p) return false;
     if (socketId !== undefined && p.socketId !== socketId) return false;
@@ -228,26 +270,30 @@ export class GameRoom {
   }
 
   startGame(now: number): { ok: true } | { ok: false; error: string } {
-    if (this.phase !== "WAITING") return { ok: false, error: "ROOM_NOT_WAITING" };
+    if (this.phase !== "WAITING")
+      return { ok: false, error: "ROOM_NOT_WAITING" };
     this.beginPlaying(now);
     return { ok: true };
   }
 
   pause(now: number): { ok: true } | { ok: false; error: string } {
-    if (this.phase !== "PLAYING") return { ok: false, error: "ROOM_NOT_PLAYING" };
+    if (this.phase !== "PLAYING")
+      return { ok: false, error: "ROOM_NOT_PLAYING" };
     this.phase = "PAUSED";
     this.pausedAt = now;
     return { ok: true };
   }
 
   resume(now: number): { ok: true } | { ok: false; error: string } {
-    if (this.phase !== "PAUSED" || this.pausedAt === null) return { ok: false, error: "ROOM_NOT_PAUSED" };
+    if (this.phase !== "PAUSED" || this.pausedAt === null)
+      return { ok: false, error: "ROOM_NOT_PAUSED" };
     const delta = now - this.pausedAt;
     this.ghost?.shiftClock(delta);
     if (this.roundDeadlineAt !== null) this.roundDeadlineAt += delta;
     for (const p of this.players.values()) {
       p.nextBoostRollAt += delta;
       if (p.boostActiveUntil !== null) p.boostActiveUntil += delta;
+      if (p.hitLockedUntil !== null) p.hitLockedUntil += delta;
     }
     this.pausedAt = null;
     this.phase = "PLAYING";
@@ -265,7 +311,8 @@ export class GameRoom {
 
   /** 重置回 WAITING（房號/名單保留），移除已永久離線的玩家；需要主辦方再按一次「開始遊戲」。 */
   restart(): { ok: true } | { ok: false; error: string } {
-    if (this.phase !== "GAME_OVER") return { ok: false, error: "ROOM_NOT_GAME_OVER" };
+    if (this.phase !== "GAME_OVER")
+      return { ok: false, error: "ROOM_NOT_GAME_OVER" };
     for (const [id, p] of [...this.players]) {
       if (p.disconnectedPermanently) {
         this.players.delete(id);
@@ -276,6 +323,7 @@ export class GameRoom {
       p.finishedAtMs = undefined;
       p.nextBoostRollAt = Infinity;
       p.boostActiveUntil = null;
+      p.hitLockedUntil = null;
       p.lastClientSeq = -1;
       p.lastStepResult = null;
       p.stepWindowStartedAt = 0;
@@ -296,13 +344,24 @@ export class GameRoom {
     foot: Foot,
     now: number,
     clientSeq?: number,
-  ): { ok: true; result: StepResultMsg; ghostChanged: boolean; concluded: GameOverReason | null; duplicate?: boolean } | { ok: false; error: StepErrorCode } {
+  ):
+    | {
+        ok: true;
+        result: StepResultMsg;
+        ghostChanged: boolean;
+        concluded: GameOverReason | null;
+        duplicate?: boolean;
+      }
+    | { ok: false; error: StepErrorCode } {
     const state = this.players.get(playerId);
     if (!state) {
       return { ok: false, error: "UNKNOWN_PLAYER" };
     }
     // 即使遊戲剛好在重試前結束，相同 sequence 仍回傳原結果，避免網路重送造成語意改變。
-    if (clientSeq !== undefined && state.lastStepResult?.clientSeq === clientSeq) {
+    if (
+      clientSeq !== undefined &&
+      state.lastStepResult?.clientSeq === clientSeq
+    ) {
       return {
         ok: true,
         result: state.lastStepResult.result,
@@ -319,7 +378,8 @@ export class GameRoom {
     }
 
     if (clientSeq !== undefined) {
-      if (clientSeq <= state.lastClientSeq) return { ok: false, error: "DUPLICATE_STEP" };
+      if (clientSeq <= state.lastClientSeq)
+        return { ok: false, error: "DUPLICATE_STEP" };
       if (now - state.stepWindowStartedAt >= STEP_RATE_LIMIT_WINDOW_MS) {
         state.stepWindowStartedAt = now;
         state.stepEventsInWindow = 0;
@@ -335,16 +395,50 @@ export class GameRoom {
     this.ghost.update(now);
     const ghostChanged = this.ghost.getState() !== beforeGhostState;
 
-    const multiplier = this.isPlayerBoosted(state, now) ? SPEED_BOOST_MULTIPLIER : 1;
+    if (state.hitLockedUntil !== null) {
+      if (now < state.hitLockedUntil) {
+        // 中槍後的「聖人模式」保護期：直接忽略這次踏步，不進 Player.step()，
+        // 所以既不會扣血也不會前進。
+        const lockedResult: StepResultMsg = {
+          kind: "locked",
+          remainingMs: state.hitLockedUntil - now,
+        };
+        if (clientSeq !== undefined)
+          state.lastStepResult = { clientSeq, result: lockedResult };
+        return {
+          ok: true,
+          result: lockedResult,
+          ghostChanged,
+          concluded: null,
+        };
+      }
+      state.hitLockedUntil = null;
+    }
+
+    const multiplier = this.isPlayerBoosted(state, now)
+      ? SPEED_BOOST_MULTIPLIER
+      : 1;
     const result = state.player.step(foot, multiplier);
     if (result.kind === "advanced" && result.finished) {
       state.finishSeq = this.nextSettlementSeq++;
       state.finishedAtMs = now;
     }
+    if (result.kind === "caught") {
+      state.hitLockedUntil = now + HIT_LOCKOUT_MS;
+    }
 
     const concluded = this.checkForConclusion(now);
-    if (clientSeq !== undefined) state.lastStepResult = { clientSeq, result: toStepResultMsg(result, state.finishedAtMs) };
-    return { ok: true, result: toStepResultMsg(result, state.finishedAtMs), ghostChanged, concluded };
+    if (clientSeq !== undefined)
+      state.lastStepResult = {
+        clientSeq,
+        result: toStepResultMsg(result, state.finishedAtMs),
+      };
+    return {
+      ok: true,
+      result: toStepResultMsg(result, state.finishedAtMs),
+      ghostChanged,
+      concluded,
+    };
   }
 
   /** 由外層的全域 tick 迴圈每 SERVER_TICK_MS 呼叫一次，推進鬼的狀態/斷線寬限期/時間上限。 */
@@ -352,17 +446,28 @@ export class GameRoom {
     const events: RoomEvent[] = [];
 
     for (const p of this.players.values()) {
-      if (!p.connected && !p.disconnectedPermanently && p.disconnectedAt !== null && now - p.disconnectedAt >= RECONNECT_GRACE_MS) {
+      if (
+        !p.connected &&
+        !p.disconnectedPermanently &&
+        p.disconnectedAt !== null &&
+        now - p.disconnectedAt >= RECONNECT_GRACE_MS
+      ) {
         p.disconnectedPermanently = true;
         p.player.eliminated = true;
-        events.push({ type: "playerConnectionChanged", playerId: p.playerId, connected: false, timedOut: true });
+        events.push({
+          type: "playerConnectionChanged",
+          playerId: p.playerId,
+          connected: false,
+          timedOut: true,
+        });
       }
     }
 
     if (this.phase === "PLAYING" && this.ghost) {
       const before = this.ghost.getState();
       this.ghost.update(now);
-      if (this.ghost.getState() !== before) events.push({ type: "ghostStateChanged" });
+      if (this.ghost.getState() !== before)
+        events.push({ type: "ghostStateChanged" });
 
       this.updateSpeedBoosts(now, events);
 
@@ -380,14 +485,26 @@ export class GameRoom {
 
       if (p.boostActiveUntil !== null && now >= p.boostActiveUntil) {
         p.boostActiveUntil = null;
-        events.push({ type: "playerBoostChanged", playerId: p.playerId, boosted: false });
+        events.push({
+          type: "playerBoostChanged",
+          playerId: p.playerId,
+          boosted: false,
+        });
       }
 
       if (now >= p.nextBoostRollAt) {
         p.nextBoostRollAt = now + SPEED_BOOST_CHECK_INTERVAL_MS;
-        if (p.boostActiveUntil === null && this.boostRng() < SPEED_BOOST_CHANCE) {
+        if (
+          p.boostActiveUntil === null &&
+          this.boostRng() < SPEED_BOOST_CHANCE
+        ) {
           p.boostActiveUntil = now + SPEED_BOOST_DURATION_MS;
-          events.push({ type: "playerBoostChanged", playerId: p.playerId, boosted: true, untilMs: p.boostActiveUntil });
+          events.push({
+            type: "playerBoostChanged",
+            playerId: p.playerId,
+            boosted: true,
+            untilMs: p.boostActiveUntil,
+          });
         }
       }
     }
@@ -405,13 +522,16 @@ export class GameRoom {
     for (const p of this.players.values()) {
       p.nextBoostRollAt = now + SPEED_BOOST_CHECK_INTERVAL_MS;
       p.boostActiveUntil = null;
+      p.hitLockedUntil = null;
     }
   }
 
   private checkForConclusion(now: number): GameOverReason | null {
     if (this.players.size === 0) return null;
     const states = [...this.players.values()];
-    const allConcluded = states.every((p) => p.player.finished || p.player.eliminated);
+    const allConcluded = states.every(
+      (p) => p.player.finished || p.player.eliminated,
+    );
     if (allConcluded) {
       const allFinished = states.every((p) => p.player.finished);
       this.endGame(allFinished ? "all-finished" : "all-eliminated");
