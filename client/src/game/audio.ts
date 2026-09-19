@@ -255,7 +255,7 @@ export class MusicPlayer {
     if (Math.abs(track.currentTime - expected) > 0.35)
       track.currentTime = expected;
 
-    if (track.paused) {
+    if (track.paused && !track.ended) {
       void track.play().catch((error: unknown) => this.handlePlayError(error));
     }
   }
@@ -306,7 +306,7 @@ export class MusicPlayer {
   ): number {
     const seconds = Math.max(0, nowMs - ghost.stateStartedAtMs) / 1000;
     return Number.isFinite(audio.duration) && audio.duration > 0
-      ? seconds % audio.duration
+      ? Math.min(seconds, Math.max(0, audio.duration - 0.02))
       : seconds;
   }
 
