@@ -3,8 +3,9 @@
 公司年會用的 3D「123 木頭人」多人連線小遊戲。手機當手把（左右腳按鍵或上下晃動前進），大螢幕當主辦方鳥瞰主控台，鬼會隨音樂節奏回頭抓正在動的人，最先抵達終點或活到最後的人獲勝。
 
 - **玩家端**：手機瀏覽器掃 QR Code 加入房間，第一人稱視角；房間可選「主視角」按鍵或「感應式」上下晃動，一次晃動前進一步。感測器不可用時保留按鍵備援。
-- **主辦方端**：投影到大螢幕的鳥瞰 3D 場景＋控制面板（房號、QR Code、玩家清單、開始/暫停/結束/重新開始、排名、鏡頭模式切換、房間設定調整）。開局前可調整分數上限、玩家操作模式與終點距離。
-- **遊戲節奏**：開始後由主辦方裝置播放 `asserts/123木頭人.mp3`；音樂播放時可前進，音樂結束後鬼轉身，隨機審視 3～6 秒，再轉回去播放下一輪。每輪速度增加 0.1x，最高 2.0x。
+- **主辦方端**：投影到大螢幕的鳥瞰 3D 場景＋控制面板（房號、QR Code、玩家清單、開始/暫停/結束/重新開始、排名、鏡頭模式切換、房間設定調整）。開局前可調整分數上限、玩家操作模式、音樂節奏、判定寬容與終點距離。大螢幕上另有「前進！／不准動！」大字狀態、被抓／出局／抵達的跑馬燈與即時前三名。
+- **遊戲節奏**：開始後由主辦方裝置播放 `asserts/123木頭人.mp3`；音樂播放時可前進，音樂結束後鬼轉身，隨機審視 3～6 秒，再轉回去播放下一輪。每輪速度增加 0.1x，最高 2.0x。主辦方可改用「隨機中斷」（音樂在隨機時間點停下）或「假動作」（音樂中途停頓、鬼假裝回頭但不判定，接著從中斷處繼續）。
+- **判定寬容**：鬼轉過來後的前 0.5 秒（可調 0／0.3／0.5／0.8 秒）收到的踩腳不前進也不扣分，吸收會場音響與手機網路的延遲，避免「音樂最後一拍還在動」的人被冤枉。
 - 判定完全在伺服器端做（移動距離、鬼有沒有在看、有沒有被抓、加速有沒有觸發），手機端只負責顯示與送出「我踩了左/右腳」的意圖，沒有作弊空間。
 
 ## 專案結構
@@ -22,9 +23,9 @@ game123/
 
 ### `shared/` — 前後端共用邏輯
 
-- `config.ts`：所有可調參數（鬼回頭時間、加速機率、房間人數上限、伺服器 tick 頻率…），前後端只有這一份，不會各自定義出不一致的數值。也定義了主辦方可調的房間設定 `RoomSettings`（分數上限、玩家模式、終點距離）與 `normalizeRoomSettings()`——伺服器收到主辦方送來的設定一律用這個函式重新驗證，超出允許範圍就退回預設值。
+- `config.ts`：所有可調參數（鬼回頭時間、加速機率、房間人數上限、伺服器 tick 頻率…），前後端只有這一份，不會各自定義出不一致的數值。也定義了主辦方可調的房間設定 `RoomSettings`（分數上限、玩家模式、終點距離、判定寬容 `graceMs`、音樂節奏 `rhythmMode`）與 `normalizeRoomSettings()`——伺服器收到主辦方送來的設定一律用這個函式重新驗證，超出允許範圍就退回預設值。
 - `Player.ts`：左右腳交替規則、扣分/淘汰/抵達終點判定，**只由伺服器 instantiate**，是唯一的權威判定邏輯。
-- `GhostAI.ts`：鬼的狀態機（`LOOK_AWAY → TURNING_TO_LOOK → LOOKING → TURNING_AWAY`）。音樂輪次與播放速度由伺服器廣播，假動作已移除。拆成兩個類別：
+- `GhostAI.ts`：鬼的狀態機（`LOOK_AWAY → TURNING_TO_LOOK → LOOKING → TURNING_AWAY`）。音樂輪次、播放速度與音樂接續位置（`musicOffsetMs`）由伺服器廣播。`fake-out` 節奏的假動作是 `TURNING_TO_LOOK → TURNING_AWAY`（跳過 `LOOKING`，不判定），之後以 `musicOffsetMs` 接著播同一輪音樂。拆成兩個類別：
   - `GhostAI`：伺服器端權威版，會真的推進狀態、丟骰子。
   - `GhostReplicaAI`：客戶端純顯示版，沒有亂數也沒有 `update()`，完全由伺服器廣播的 `ghost:stateChanged` 驅動，**只能拿來做視覺效果，絕對不能拿來做任何判定**。
 - `ranking.ts`：結算排名規則（抵達終點依完成順序、存活/淘汰依距離排序）。
@@ -32,9 +33,9 @@ game123/
 
 ### `server/` — 伺服器（Node.js + Express + Socket.IO）
 
-- `src/index.ts`：起 Express（順便伺服 `client/dist` 靜態檔案與 `/`、`/host`、`/join/:code` 路由）+ Socket.IO，並用**單一全域 `setInterval`**（`SERVER_TICK_MS = 100ms`）推進所有房間的狀態，而不是每個房間各自一個計時器。
+- `src/index.ts`：起 Express（順便伺服 `client/dist` 靜態檔案與 `/`、`/host`、`/join/:code` 路由）+ Socket.IO，並用**單一全域 `setInterval`**（`SERVER_TICK_MS = 100ms`）推進所有房間的狀態，而不是每個房間各自一個計時器。同一個 tick 也負責把累積的玩家進度合併成一包 `room:playersProgress` 送出。
 - `src/rooms/RoomManager.ts`：管理所有房間（`Map<房號, GameRoom>`），並負責回收長時間沒人連線的房間。
-- `src/rooms/GameRoom.ts`：單一房間的完整權威狀態機（`WAITING → PLAYING → GAME_OVER`，`PLAYING` 期間可 `PAUSED`），包含鬼的推進、音樂輪次、隨機加速、斷線寬限期、結算排名等所有邏輯。
+- `src/rooms/GameRoom.ts`：單一房間的完整權威狀態機（`WAITING → PLAYING → GAME_OVER`，`PLAYING` 期間可 `PAUSED`），包含鬼的推進、音樂輪次、判定寬容期、隨機加速、斷線寬限期、主控台斷線自動暫停、結算排名等所有邏輯。
 - `src/sockets/`：把 Socket.IO 的具名事件（見下方協定表）接到 `GameRoom`/`RoomManager` 上，並負責把結果廣播出去。
 
 ### `client/` — 前端（Vite + TypeScript + Three.js）
@@ -42,9 +43,9 @@ game123/
 兩個獨立入口，共用同一份 3D 場景建置程式碼（`game/fieldEnvironment.ts`）與鬼的視覺呈現（`game/ghostVisual.ts`）：
 
 - `player.html` / `main-player.ts`：玩家手機端。`ui/JoinScreen.ts`（輸入房號＋名字）→ `game/NetworkedGameController.ts`（把伺服器廣播轉譯成畫面/音效，本身不做任何判定）。網址帶 `?offline=1` 可以跳過連線，直接跑最早的單機版 `game/GameController.ts`（純調美術/音效時不用開伺服器）。
-- `host.html` / `main-host.ts`：主辦方主控台。`host/HostController.ts` 統籌 `host/HostScene.ts`（鳥瞰 3D，玩家頭像用 `InstancedMesh` 一次 draw call 畫完，支援鳥瞰／跟隨領先者／跟隨落後者／自由拖曳四種鏡頭模式）與 `host/HostConsolePanel.ts`（房號、QR Code、玩家清單、控制按鈕、鏡頭模式選單、排名彈窗）。
+- `host.html` / `main-host.ts`：主辦方主控台。`host/HostController.ts` 統籌 `host/HostScene.ts`（鳥瞰 3D，玩家頭像用 `InstancedMesh` 一次 draw call 畫完，支援鳥瞰／跟隨領先者／跟隨落後者／自由拖曳四種鏡頭模式；超過 20 人時只顯示前 5 名與剛被抓／出局／抵達者的名牌）、`host/HostConsolePanel.ts`（房號、QR Code、玩家清單、控制按鈕、鏡頭模式選單、排名彈窗）與 `host/HostStageOverlay.ts`（大螢幕的狀態大字、跑馬燈、即時前三名）。
 - `net/SocketClient.ts`：對 `socket.io-client` 的薄封裝，把所有事件名稱/型別收斂到這一份。
-- `net/ClockSync.ts`：用伺服器回報的時間戳算跟本機時間的偏移量，純顯示用，不影響判定公平性。
+- `net/ClockSync.ts`：連線後用 `time:sync` 量幾次來回延遲，以「伺服器時間 + RTT/2」校正跟本機時間的偏移量（校正前才退而使用廣播附帶的時間戳）。只影響畫面、倒數與主控台音樂對拍，不影響判定公平性。
 - `game/audio.ts`：保留 Web Audio API 合成的短音效，並以 `MusicPlayer` 同步主辦方端的 MP3 播放、暫停、恢復與播放速度。
 - `input/MotionInput.ts`：在使用者確認教學時請求裝置感測器權限，將校正過的上下晃動轉成左右腳交替步進。
 
@@ -60,17 +61,18 @@ game123/
 | `host:updateSettings`                                                     | 主辦方調整房間設定（分數上限、玩家模式、終點距離），僅 `WAITING` 階段允許，伺服器一律用 `normalizeRoomSettings()` 重新驗證 |
 | `player:joinRoom`                                                         | 玩家加入；伺服器產生 `playerId` 與 `playerSessionToken`                                                                    |
 | `player:resumeRoom`                                                       | 玩家以房號、玩家 ID 與 session token 恢復房間                                                                              |
-| `player:step`                                                             | 玩家只送出 `{ foot, clientSeq }`；伺服器負責驗證、去重與限流                                                               |
+| `player:step`                                                             | 玩家只送出 `{ foot, clientSeq }`；伺服器負責驗證、去重與限流，並直接在 ack 回傳這一步的結果                                |
+| `time:sync`                                                               | 回傳伺服器目前時間，供客戶端量測來回延遲、校正時鐘                                                                         |
 
 **Server → Room**（廣播）：
 
 | 事件                               | 時機                                               |
 | ---------------------------------- | -------------------------------------------------- |
 | `room:state`                       | 完整快照，結構性變化時送出（加入/離開/階段變化等） |
-| `room:playerJoined` / `playerLeft` | 增量更新                                           |
-| `room:phaseChanged`                | 遊戲階段推進，附帶本輪設定與時間資訊               |
+| `room:startCountdown`              | 開場 3 秒倒數                                      |
+| `room:phaseChanged`                | 遊戲階段推進，附帶本輪設定、時間資訊與暫停原因     |
 | `ghost:stateChanged`               | 鬼的狀態真的轉換時送出（不逐幀送）                 |
-| `room:playerStepped`               | 每次處理完一次踩腳後廣播                           |
+| `room:playersProgress`             | 每個 tick 合併一次有變化的玩家進度（感應模式只送主控台） |
 | `room:playerBoostChanged`          | 隨機加速視窗開始/結束                              |
 | `room:playerConnectionChanged`     | 斷線/重連/寬限期到期                               |
 | `room:gameOver`                    | 結算，附上排名                                     |
@@ -140,13 +142,25 @@ node scripts/load-test.mjs
 LOAD_TEST_PLAYERS=150 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs   # 自訂人數/時長
 ```
 
-實測：單一房間 100 位玩家（人數上限）同時連線＋連續踩腳，`player:step` 往返延遲中位數 <1ms；3 個房間共 300 位玩家同時運作，伺服器 CPU 峰值仍在 20% 以內。
+實測（開發機、本機連線）：單一房間 100 位玩家（人數上限）同時連線＋連續踩腳，`player:step` 往返延遲中位數 <1ms；3 個房間共 300 位玩家同時運作，伺服器 CPU 峰值仍在 20% 以內。**這個數字不代表正式環境**——Render 免費方案只有約 0.1 CPU，加上真實網路延遲，上場前請對正式網址再跑一次：
+
+```bash
+LOAD_TEST_SERVER_URL=https://<你的 Render 網址> LOAD_TEST_PLAYERS=60 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs
+```
 
 ## 加分玩法
 
 - **最後衝刺**：距終點剩一小段距離時跳出提示＋畫面警示暈影。
 - **隨機加速**：每位玩家每隔一段時間有機率進入短暫加速窗口，移動速度變 1.5 倍。
 - **主辦方鏡頭模式**：鳥瞰（固定機位）／跟隨領先者／跟隨落後者／自由拖曳鏡頭，四種模式可即時切換。
+- **音樂節奏變化**：經典／隨機中斷／假動作三種，開局前在主控台切換。
+- **大螢幕效果**：「▶ 前進！」「✋ 不准動！」大字狀態、「💥 誰被抓到了」「💀 誰出局」「🏆 誰抵達終點」跑馬燈、即時前三名。
+
+## 現場穩定性設計
+
+- **判定寬容期**：見上方「判定寬容」。音響越慢（藍牙喇叭、長距離 PA）就把寬容期調大。
+- **主控台斷線自動暫停**：音樂只從主控台播放。遊戲進行中主控台斷線超過 2 秒（`HOST_DISCONNECT_PAUSE_MS`），伺服器自動暫停並通知所有玩家；主控台重新連上後不會自動恢復，由主持人確認音樂正常後按「繼續遊戲」。
+- **合併廣播**：踩腳結果只用 ack 回給本人，其他人看到的進度由伺服器每 100ms 合併一包送出；感應模式的手機不畫其他玩家，進度只送主控台。60 人連續踩腳時，比逐步廣播給全房間少了數量級的訊息量。
 
 ## 部署
 
@@ -155,5 +169,6 @@ LOAD_TEST_PLAYERS=150 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs   # 自
 ## 尚未處理
 
 - 自訂網域／HTTPS 憑證等正式上線的收尾設定。
-- 資料持久化——目前房間狀態純記憶體，伺服器重啟就消失，也沒有活動紀錄/歷史排行榜。
-- 正式 3D 美術資源：目前的娃娃/樹/玩家都是程式合成的 sprite 貼圖，不是 `.glb` 模型。
+- 資料持久化——目前房間狀態純記憶體，伺服器重啟（含 Render 免費方案休眠後喚醒）就消失，也沒有活動紀錄/歷史排行榜。部署建議見 [`佈署計畫.md`](佈署計畫.md)。
+
+3D 美術已改用 Blender 輸出的 `.glb` 模型（`client/public/models/` 的 doll／guard／house／player／tree，來源在 `art/*.blend`，由 `scripts/build-blender-assets.py` 產生）；模型載入失敗時會退回程式合成的場景。
