@@ -91,6 +91,8 @@ export class HostScene {
   private readonly outcomeEffects: OutcomeEffects;
   private readonly labelsContainer: HTMLDivElement;
   private readonly labelEls = new Map<string, HTMLDivElement>();
+  /** 人多時只顯示這些玩家的名牌（null＝全部顯示），避免幾十個名牌疊成一團。 */
+  private labelFocus: ReadonlySet<string> | null = null;
   private readonly latestAvatars = new Map<
     string,
     { x: number; z: number; player: HostAvatarInput }
@@ -186,6 +188,11 @@ export class HostScene {
 
   updateGhostVisual(facingAmount: number, isLooking: boolean): void {
     this.ghostVisual.update(facingAmount, isLooking);
+  }
+
+  /** 下一次 updateAvatars() 起只顯示這些玩家的名牌；null＝全部顯示。 */
+  setLabelFocus(focus: ReadonlySet<string> | null): void {
+    this.labelFocus = focus;
   }
 
   /** 依目前玩家清單重新擺放所有玩家的頭像與姓名/分數標籤（依加入順序分配固定車道）。 */
@@ -456,6 +463,8 @@ export class HostScene {
             ? "⚡"
             : "";
     el.textContent = `${player.name} ${status}`.trim();
+    el.hidden =
+      this.labelFocus !== null && !this.labelFocus.has(player.playerId);
 
     this.positionLabel(el, worldX, worldZ);
   }

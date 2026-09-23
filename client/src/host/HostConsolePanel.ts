@@ -1,7 +1,9 @@
 import QRCode from "qrcode";
 import {
   DEFAULT_ROOM_SETTINGS,
+  GRACE_OPTIONS_MS,
   PLAYER_MODE_OPTIONS,
+  RHYTHM_MODE_OPTIONS,
   SCORE_OPTIONS,
   START_COUNTDOWN_MS,
   type GhostState,
@@ -10,6 +12,7 @@ import {
   type PlayerSummary,
   type RankedPlayer,
   type RoomPhase,
+  type RhythmMode,
   type RoomSettings,
 } from "shared";
 import type { HostCameraMode } from "./HostScene";
@@ -41,6 +44,11 @@ const PHASE_LABEL: Record<RoomPhase, string> = {
   PAUSED: "遊戲已暫停",
   GAME_OVER: "本局已結束",
 };
+const RHYTHM_LABEL: Record<RhythmMode, string> = {
+  classic: "經典",
+  "random-cut": "隨機中斷",
+  "fake-out": "假動作",
+};
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 export class HostConsolePanel {
@@ -66,6 +74,8 @@ export class HostConsolePanel {
   private readonly actionButtons = new Map<string, HTMLButtonElement>();
   private readonly scoreButtons = new Map<number, HTMLButtonElement>();
   private readonly playerModeButtons = new Map<PlayerMode, HTMLButtonElement>();
+  private readonly graceButtons = new Map<number, HTMLButtonElement>();
+  private readonly rhythmButtons = new Map<RhythmMode, HTMLButtonElement>();
   private readonly distanceInput = document.createElement("input");
   private readonly distanceEl = document.createElement("div");
   private settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS };
@@ -156,6 +166,27 @@ export class HostConsolePanel {
           callbacks.onSettingsChange({ ...this.settings, playerMode }),
       ),
     );
+    settings.append(
+      this.settingRow(
+        "音樂節奏",
+        RHYTHM_MODE_OPTIONS,
+        this.rhythmButtons,
+        (mode) => RHYTHM_LABEL[mode],
+        (rhythmMode) =>
+          callbacks.onSettingsChange({ ...this.settings, rhythmMode }),
+      ),
+    );
+    // 會場音響（尤其藍牙喇叭）越慢、手機網路越擠，寬容期就要開越大，才不會冤枉「最後一拍還在動」的人。
+    const graceRow = this.settingRow(
+      "判定寬容（含音響延遲）",
+      GRACE_OPTIONS_MS,
+      this.graceButtons,
+      (ms) => (ms === 0 ? "關" : `${(ms / 1000).toFixed(1)}s`),
+      (graceMs) => callbacks.onSettingsChange({ ...this.settings, graceMs }),
+    );
+    graceRow.title =
+      "鬼剛轉過來的這段時間內踩的腳不前進也不扣分，用來吸收音響與網路延遲";
+    settings.append(graceRow);
     const distanceLabel = document.createElement("label");
     distanceLabel.className = "setting-row distance-setting";
     distanceLabel.innerHTML = "<span>遊戲距離（m）</span>";
@@ -365,6 +396,10 @@ export class HostConsolePanel {
       button.setAttribute("aria-pressed", String(value === settings.maxScore));
     for (const [mode, button] of this.playerModeButtons)
       button.setAttribute("aria-pressed", String(mode === settings.playerMode));
+    for (const [ms, button] of this.graceButtons)
+      button.setAttribute("aria-pressed", String(ms === settings.graceMs));
+    for (const [mode, button] of this.rhythmButtons)
+      button.setAttribute("aria-pressed", String(mode === settings.rhythmMode));
   }
 
   /** 開場運鏡＋倒數期間呼叫 setStarting(true) 鎖住「開始遊戲」鈕；期間收到的快照更新（setPhase）不能把它重新打開。 */
@@ -447,6 +482,8 @@ export class HostConsolePanel {
     for (const button of [
       ...this.scoreButtons.values(),
       ...this.playerModeButtons.values(),
+      ...this.graceButtons.values(),
+      ...this.rhythmButtons.values(),
     ]) {
       button.disabled = phase !== "WAITING";
     }

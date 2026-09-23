@@ -11,7 +11,7 @@ import {
 import type { GameRoom } from "../rooms/GameRoom";
 import type { RoomManager } from "../rooms/RoomManager";
 import { RateLimiter } from "../RateLimiter";
-import { broadcastSnapshot } from "./broadcast";
+import { broadcastSnapshot, phaseChangedPayload } from "./broadcast";
 import {
   isEmptyPayload,
   isHostCreateRoomPayload,
@@ -42,13 +42,7 @@ function withHostRoom(
   }
   const snapshot = room.toSnapshot(now);
   broadcastSnapshot(io, room, now);
-  io.to(room.code).emit(SOCKET_EVENTS.roomPhaseChanged, {
-    phase: snapshot.phase,
-    serverNowMs: snapshot.serverNowMs,
-    roundStartedAtMs: snapshot.roundStartedAtMs,
-    roundDeadlineMs: snapshot.roundDeadlineMs,
-    settings: snapshot.settings,
-  });
+  io.to(room.code).emit(SOCKET_EVENTS.roomPhaseChanged, phaseChangedPayload(snapshot));
   if (room.phase === "GAME_OVER") {
     io.to(room.code).emit(SOCKET_EVENTS.roomGameOver, {
       ranking: room.getLastRanking(),

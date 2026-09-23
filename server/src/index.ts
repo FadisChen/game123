@@ -3,12 +3,13 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
-import { SERVER_TICK_MS } from "shared";
+import { SERVER_TICK_MS, SOCKET_EVENTS, type TimeSyncAck } from "shared";
 import { RoomManager } from "./rooms/RoomManager";
 import { registerHostHandlers } from "./sockets/hostHandlers";
 import { registerPlayerHandlers } from "./sockets/playerHandlers";
 import { registerDisconnectHandler } from "./sockets/disconnectHandler";
-import { applyRoomEvents, broadcastSnapshot } from "./sockets/broadcast";
+import { applyRoomEvents, broadcastSnapshot, flushProgress } from "./sockets/broadcast";
+import { isEmptyPayload, safeAck } from "./sockets/validation";
 import { RateLimiter } from "./RateLimiter";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,15 +65,21 @@ io.on("connection", (socket) => {
   registerHostHandlers(io, socket, roomManager, createRoomLimiter);
   registerPlayerHandlers(io, socket, roomManager, joinRoomLimiter);
   registerDisconnectHandler(io, socket, roomManager);
+  // 客戶端量測來回延遲、校正時鐘偏移（主控台音樂對拍與倒數用），不影響任何判定。
+  socket.on(SOCKET_EVENTS.timeSync, (payload: unknown, ack: unknown) => {
+    if (!isEmptyPayload(payload)) return;
+    safeAck<TimeSyncAck>(ack)({ serverNowMs: Date.now() });
+  });
 });
 
 setInterval(() => {
   const now = Date.now();
   const eventsByRoom = roomManager.tickAll(now);
   for (const [code, events] of eventsByRoom) {
-    if (events.length === 0) continue;
     const room = roomManager.getRoom(code);
     if (!room) continue;
+    flushProgress(io, room);
+    if (events.length === 0) continue;
     applyRoomEvents(io, room, events, now);
     if (events.some((e) => e.type === "phaseChanged" || e.type === "playerConnectionChanged")) {
       broadcastSnapshot(io, room, now);

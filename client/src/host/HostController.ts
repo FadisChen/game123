@@ -2,9 +2,10 @@ import {
   GhostReplicaAI,
   type ConnectionState,
   type GhostVisualState,
+  type PausedReason,
   type PlayerSummary,
   type RoomPlayerBoostChangedPayload,
-  type RoomPlayerSteppedPayload,
+  type RoomPlayersProgressPayload,
   type RoomStateSnapshot,
 } from "shared";
 import {
@@ -15,7 +16,14 @@ import {
 import { ClockSync } from "../net/ClockSync";
 import { HostScene } from "./HostScene";
 import { HostConsolePanel } from "./HostConsolePanel";
+import { HostStageOverlay, rankLive } from "./HostStageOverlay";
 import { MusicPlayer, sfx } from "../game/audio";
+
+/** 超過這個人數就只顯示領先者與剛出事的人的名牌。 */
+const LABEL_FOCUS_THRESHOLD = 20;
+const LABEL_FOCUS_LEADERS = 5;
+/** 被抓／出局／抵達的玩家名牌在大螢幕上多亮幾秒。 */
+const LABEL_HIGHLIGHT_MS = 4000;
 
 /** 主辦方主控台的頂層控制器：建立房間、串接 HostScene（鳥瞰 3D）與 HostConsolePanel（側邊欄）。 */
 export class HostController {
@@ -35,6 +43,10 @@ export class HostController {
 
   private scene: HostScene | null = null;
   private panel: HostConsolePanel | null = null;
+  private overlay: HostStageOverlay | null = null;
+  private pausedReason: PausedReason | undefined;
+  /** playerId -> 名牌強制顯示到什麼時候（performance.now()）。 */
+  private readonly highlightedUntil = new Map<string, number>();
   private roomCode = "";
   private playersDirty = false;
   /** 避免開場運鏡＋倒數播放期間被連點「開始遊戲」重複觸發。 */
@@ -49,6 +61,7 @@ export class HostController {
     this.wireSocketEvents();
     this.socketClient.onConnectionState((state) => this.setConnectionState(state));
     this.socketClient.onReconnect(() => void this.resumeSession());
+    void this.clock.calibrate(() => this.socketClient.serverNow());
     void this.createRoom();
     requestAnimationFrame(() => this.loop());
   }
@@ -94,6 +107,7 @@ export class HostController {
     }
     this.container.appendChild(viewport);
     this.scene = new HostScene(viewport);
+    this.overlay = new HostStageOverlay(viewport);
 
     const joinUrl = `${location.origin}/join/${this.roomCode}`;
     this.panel = new HostConsolePanel(this.container, this.roomCode, joinUrl, {
@@ -171,6 +185,7 @@ export class HostController {
         return;
       }
       this.setConnectionState("connected");
+      void this.clock.calibrate(() => this.socketClient.serverNow());
       this.applySnapshot(ack.snapshot);
     } catch {
       this.panel?.showConnectionError("連線逾時，正在等待重新連線…");
@@ -183,10 +198,13 @@ export class HostController {
     this.socketClient.onPhaseChanged((payload) => {
       this.clock.updateFromServerNow(payload.serverNowMs);
       this.currentPhase = payload.phase;
+      this.setPausedReason(payload.pausedReason);
       this.panel?.setSettings(payload.settings);
       this.scene?.setFinishDistance(payload.settings.finishDistanceM);
       this.panel?.setPhase(payload.phase);
-      this.syncMusic(payload.serverNowMs);
+      if (payload.phase === "WAITING") this.overlay?.clearTicker();
+      this.syncMusic(this.clock.nowServerMs());
+      this.refreshPlayerViews();
     });
 
     this.socketClient.onStartCountdown((payload) => {
@@ -211,12 +229,13 @@ export class HostController {
         payload.stateDurationMs,
         payload.musicCycle,
         payload.musicPlaybackRate,
+        payload.musicOffsetMs,
       );
       this.syncMusic(this.clock.nowServerMs());
     });
 
-    this.socketClient.onPlayerStepped((payload) =>
-      this.handlePlayerStepped(payload),
+    this.socketClient.onPlayersProgress((payload) =>
+      this.handlePlayersProgress(payload),
     );
 
     this.socketClient.onPlayerBoostChanged((payload) =>
@@ -228,12 +247,14 @@ export class HostController {
       this.music.stop();
       this.panel?.setPhase("GAME_OVER");
       this.panel?.showRanking(payload.ranking);
+      this.refreshPlayerViews();
     });
   }
 
   private applySnapshot(snapshot: RoomStateSnapshot): void {
     this.clock.updateFromServerNow(snapshot.serverNowMs);
     this.currentPhase = snapshot.phase;
+    this.setPausedReason(snapshot.pausedReason);
     this.currentGhost = snapshot.ghost;
     if (snapshot.ghost) {
       this.ghostReplica.applyServerState(
@@ -242,6 +263,7 @@ export class HostController {
         snapshot.ghost.stateDurationMs,
         snapshot.ghost.musicCycle,
         snapshot.ghost.musicPlaybackRate,
+        snapshot.ghost.musicOffsetMs,
       );
     }
 
@@ -252,34 +274,73 @@ export class HostController {
     this.panel?.setSettings(snapshot.settings);
     this.scene?.setFinishDistance(snapshot.settings.finishDistanceM);
     this.panel?.setPhase(snapshot.phase);
-    this.syncMusic(snapshot.serverNowMs);
+    this.syncMusic(this.clock.nowServerMs());
     this.refreshPlayerViews();
+  }
+
+  /** 主控台曾經斷線被伺服器自動暫停時，提醒主持人先確認音樂再按「繼續」。 */
+  private setPausedReason(reason: PausedReason | undefined): void {
+    const wasAutoPaused = this.pausedReason === "host-disconnected";
+    this.pausedReason = reason;
+    if (wasAutoPaused && reason !== "host-disconnected")
+      this.panel?.setConnectionState(this.connectionState);
+    if (reason === "host-disconnected")
+      this.panel?.showConnectionError(
+        "主控台曾斷線，遊戲已自動暫停。確認音樂正常後按「繼續遊戲」。",
+      );
   }
 
   private syncMusic(serverNowMs: number): void {
     this.music.sync(this.currentGhost, this.currentPhase, serverNowMs);
   }
 
-  /** room:playerStepped 沒有附帶完整快照，直接局部更新那一位玩家，讓鳥瞰畫面上的位置能逐步移動而不是等下一次快照才跳動。 */
-  private handlePlayerStepped(payload: RoomPlayerSteppedPayload): void {
-    if (payload.result.kind === "caught") {
-      sfx.play("caught");
-      this.scene?.playDamageEffect(payload.playerId);
+  /**
+   * room:playersProgress 是伺服器每個 tick 合併的進度，沒有附帶完整快照，直接局部更新這幾位玩家，
+   * 讓鳥瞰畫面上的位置能逐步移動而不是等下一次快照才跳動。
+   */
+  private handlePlayersProgress({ updates }: RoomPlayersProgressPayload): void {
+    for (const update of updates) {
+      const existing = this.players.get(update.playerId);
+      for (let i = 0; i < (update.caught ?? 0); i++) sfx.play("caught");
+      if (update.caught) {
+        this.scene?.playDamageEffect(update.playerId);
+        // 出局的跑馬燈由 syncOutcomeEffects() 統一處理，這裡只報「被抓但還活著」。
+        if (existing && !update.eliminated) {
+          this.overlay?.announceCaught(existing.name);
+          this.highlight(update.playerId);
+        }
+      }
+      if (!existing) continue;
+      existing.distance = update.distance;
+      existing.score = update.score;
+      existing.eliminated = update.eliminated;
+      existing.finished = update.finished;
+      if (update.finishedAtMs !== undefined)
+        existing.finishedAtMs = update.finishedAtMs;
     }
-    const existing = this.players.get(payload.playerId);
-    if (!existing) return;
-
-    if (payload.result.kind === "advanced") {
-      existing.distance = payload.result.distanceAfter;
-      existing.finished = payload.result.finished;
-      if (payload.result.finished)
-        existing.finishedAtMs = payload.result.finishedAtMs;
-    } else if (payload.result.kind === "caught") {
-      existing.score = payload.result.scoreAfter;
-      existing.eliminated = payload.result.eliminated;
-    }
-
     this.refreshPlayerViews();
+  }
+
+  private highlight(playerId: string): void {
+    this.highlightedUntil.set(playerId, performance.now() + LABEL_HIGHLIGHT_MS);
+    // 到期後要再算一次名牌該不該顯示。
+    window.setTimeout(() => this.refreshPlayerViews(), LABEL_HIGHLIGHT_MS + 50);
+  }
+
+  /** 人多時只留領先者與剛出事的人的名牌；人少時全部顯示。 */
+  private labelFocusFor(players: PlayerSummary[]): Set<string> | null {
+    if (players.length <= LABEL_FOCUS_THRESHOLD) return null;
+    const focus = new Set(
+      rankLive(players)
+        .slice(0, LABEL_FOCUS_LEADERS)
+        .map((p) => p.playerId),
+    );
+    const now = performance.now();
+    for (const [id, until] of this.highlightedUntil) {
+      if (until > now) focus.add(id);
+      else this.highlightedUntil.delete(id);
+    }
+    return focus;
   }
 
   /** room:playerBoostChanged 也沒有附帶完整快照，直接局部更新那一位玩家的加速旗標（PRD 22.2）。 */
@@ -293,7 +354,7 @@ export class HostController {
   }
 
   /**
-   * 統一在這裡 diff 而不是在 handlePlayerStepped()：出局有三條路徑（自己踏步被抓、
+   * 統一在這裡 diff 而不是在 handlePlayersProgress()：出局有三條路徑（自己踏步被抓、
    * 斷線寬限期到期、以及重連後才收到的完整快照），全部都會流經玩家清單的更新。
    */
   private syncOutcomeEffects(players: PlayerSummary[]): void {
@@ -316,6 +377,17 @@ export class HostController {
         continue;
       this.scene?.playOutcomeEffect(player.playerId, outcome);
       this.panel?.flashPlayer(player.playerId, outcome);
+      this.highlight(player.playerId);
+      if (outcome === "finished") {
+        const place = players.filter(
+          (p) =>
+            p.finished &&
+            (p.finishedAtMs ?? 0) <= (player.finishedAtMs ?? Infinity),
+        ).length;
+        this.overlay?.announceFinished(player.name, place);
+      } else if (!player.disconnectedPermanently) {
+        this.overlay?.announceEliminated(player.name);
+      }
     }
     for (const id of [...this.lastOutcome.keys()]) {
       if (!seen.has(id)) this.lastOutcome.delete(id);
@@ -333,12 +405,19 @@ export class HostController {
         this.playersDirty = false;
         const players = [...this.players.values()];
         this.panel?.setPlayers(players);
+        this.overlay?.setLeaderboard(players, this.currentPhase);
+        this.scene.setLabelFocus(this.labelFocusFor(players));
         this.scene.updateAvatars(players);
         // 特效要拿角色在場上的座標，所以一定得排在 updateAvatars() 之後。
         this.syncOutcomeEffects(players);
       }
       const serverNow = this.clock.nowServerMs();
       this.syncMusic(serverNow);
+      this.overlay?.setStatus(
+        this.currentPhase,
+        this.ghostReplica.getState(),
+        this.pausedReason,
+      );
       const isLooking = this.ghostReplica.isLooking();
       this.scene.updateGhostVisual(
         this.ghostReplica.getFacingPlayerAmount(serverNow),

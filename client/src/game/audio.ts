@@ -291,9 +291,11 @@ export class MusicPlayer {
     ghost: GhostVisualState,
     nowMs: number,
   ): number {
+    // musicOffsetMs：fake-out 假動作之後，這段音樂從中斷處接著播，而不是從頭開始。
     const seconds =
+      (ghost.musicOffsetMs ?? 0) / 1000 +
       (Math.max(0, nowMs - ghost.stateStartedAtMs) / 1000) *
-      ghost.musicPlaybackRate;
+        ghost.musicPlaybackRate;
     return Number.isFinite(audio.duration)
       ? Math.min(seconds, Math.max(0, audio.duration - 0.02))
       : seconds;

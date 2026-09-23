@@ -5,6 +5,7 @@ import {
   GhostReplicaAI,
   HIT_LOCKOUT_MS,
   type Foot,
+  type PausedReason,
   type PlayerMode,
   type PlayerSummary,
   type RoomGameOverPayload,
@@ -47,6 +48,7 @@ export class NetworkedGameController {
   private playersDirty = false;
 
   private serverPhase: RoomPhase = "WAITING";
+  private pausedReason: PausedReason | undefined;
   private teachingDismissed = false;
   private playerMode: PlayerMode = "main";
   private finishDistanceM = FINISH_DISTANCE_M;
@@ -108,6 +110,7 @@ export class NetworkedGameController {
       this.setConnectionState(state),
     );
     this.socketClient.onReconnect(() => void this.resumeSession());
+    void this.clock.calibrate(() => this.socketClient.serverNow());
     this.applySnapshot(initialSnapshot);
     container.classList.remove("portrait-setup");
 
@@ -120,6 +123,7 @@ export class NetworkedGameController {
     this.socketClient.onPhaseChanged((payload) => {
       this.clock.updateFromServerNow(payload.serverNowMs);
       this.serverPhase = payload.phase;
+      this.pausedReason = payload.pausedReason;
       this.applyRoomSettings(payload.settings);
       this.syncScreensToPhase();
     });
@@ -139,21 +143,21 @@ export class NetworkedGameController {
         payload.stateDurationMs,
         payload.musicCycle,
         payload.musicPlaybackRate,
+        payload.musicOffsetMs,
       );
     });
 
-    this.socketClient.onPlayerStepped((payload) => {
-      const player = this.players.get(payload.playerId);
-      if (player && payload.result.kind === "advanced") {
-        player.distance = payload.result.distanceAfter;
-        player.finished = payload.result.finished;
-      } else if (player && payload.result.kind === "caught") {
-        player.score = payload.result.scoreAfter;
-        player.eliminated = payload.result.eliminated;
+    // 其他玩家的進度由伺服器每個 tick 合併送一次（只有主視角模式會收到）；自己的結果走 step 的 ack。
+    this.socketClient.onPlayersProgress(({ updates }) => {
+      for (const update of updates) {
+        const player = this.players.get(update.playerId);
+        if (!player) continue;
+        player.distance = update.distance;
+        player.score = update.score;
+        player.eliminated = update.eliminated;
+        player.finished = update.finished;
       }
       this.refreshPlayers();
-      if (payload.playerId !== this.playerId) return;
-      this.handleOwnStepResult(payload.foot, payload.result);
     });
 
     this.socketClient.onPlayerBoostChanged((payload) => {
@@ -184,6 +188,7 @@ export class NetworkedGameController {
         return;
       }
       this.setConnectionState("connected");
+      void this.clock.calibrate(() => this.socketClient.serverNow());
       this.applySnapshot(ack.snapshot);
     } catch {
       this.waiting.setMessage("重新連線中…");
@@ -196,6 +201,7 @@ export class NetworkedGameController {
   private applySnapshot(snapshot: RoomStateSnapshot): void {
     this.clock.updateFromServerNow(snapshot.serverNowMs);
     this.serverPhase = snapshot.phase;
+    this.pausedReason = snapshot.pausedReason;
     this.applyRoomSettings(snapshot.settings);
     this.players.clear();
     for (const player of snapshot.players)
@@ -208,6 +214,7 @@ export class NetworkedGameController {
         snapshot.ghost.stateDurationMs,
         snapshot.ghost.musicCycle,
         snapshot.ghost.musicPlaybackRate,
+        snapshot.ghost.musicOffsetMs,
       );
     }
     const mine = snapshot.players.find((p) => p.playerId === this.playerId);
@@ -292,7 +299,7 @@ export class NetworkedGameController {
       !["PLAYING", "PAUSED"].includes(this.serverPhase);
     this.motionPrompt.textContent =
       this.serverPhase === "PAUSED"
-        ? "遊戲暫停\n請保持靜止，等待主辦方繼續"
+        ? `${this.pauseMessage()}\n請保持靜止，等待主辦方繼續`
         : "感應模式\n請看主辦方畫面，依現場音樂移動";
     if (this.playerMode === "motion") {
       this.motionInput.setGameplayActive(this.serverPhase === "PLAYING");
@@ -337,8 +344,17 @@ export class NetworkedGameController {
         this.gameOver.hide();
         this.hud.setVisible(this.playerMode === "main");
         if (this.myOutcome === "active") {
-          this.waiting.setVisible(false);
           this.controls.setVisible(false);
+          // 主控台斷線造成的自動暫停：主視角玩家也要知道為什麼突然不能動。
+          if (
+            this.playerMode === "main" &&
+            this.pausedReason === "host-disconnected"
+          ) {
+            this.waiting.setMessage(this.pauseMessage());
+            this.waiting.setVisible(true);
+          } else {
+            this.waiting.setVisible(false);
+          }
         } else {
           // 自己已經淘汰或抵達終點，但房間裡還有其他玩家在玩——關掉操作按鈕，顯示個人結果，
           // 等到 room:gameOver（全員結束）才顯示完整排名畫面。
@@ -377,7 +393,34 @@ export class NetworkedGameController {
     sfx.unlock();
     void this.socketClient
       .step({ foot, clientSeq: this.socketClient.getNextPlayerClientSeq() })
+      .then((ack) => {
+        if (!ack.ok) return;
+        this.applyOwnProgress(ack.result);
+        this.handleOwnStepResult(foot, ack.result);
+      })
       .catch(() => undefined);
+  }
+
+  /** 自己的名單資料直接用 ack 更新，不必等下一個 tick 的進度批次。 */
+  private applyOwnProgress(result: StepResultMsg): void {
+    const mine = this.players.get(this.playerId);
+    if (!mine) return;
+    if (result.kind === "advanced") {
+      mine.distance = result.distanceAfter;
+      mine.finished = result.finished;
+    } else if (result.kind === "caught") {
+      mine.score = result.scoreAfter;
+      mine.eliminated = result.eliminated;
+    } else {
+      return;
+    }
+    this.refreshPlayers();
+  }
+
+  private pauseMessage(): string {
+    return this.pausedReason === "host-disconnected"
+      ? "主控台連線中斷，遊戲自動暫停"
+      : "遊戲暫停";
   }
 
   private handleMotionStep(foot: Foot): void {
@@ -420,6 +463,7 @@ export class NetworkedGameController {
         }
         break;
       case "locked":
+      case "ignored":
         break;
     }
   }

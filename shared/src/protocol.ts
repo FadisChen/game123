@@ -9,6 +9,9 @@ export type HostId = string;
 
 export type RoomPhase = "WAITING" | "PLAYING" | "PAUSED" | "GAME_OVER";
 
+/** host：主辦方手動暫停；host-disconnected：主控台（音樂來源）斷線，伺服器自動暫停。 */
+export type PausedReason = "host" | "host-disconnected";
+
 export type JoinErrorCode =
   | "ROOM_NOT_FOUND"
   | "NAME_TAKEN"
@@ -58,6 +61,8 @@ export interface GhostVisualState {
   /** 目前音樂循環的序號與播放速度；客戶端只用來同步音檔，不能反過來驅動伺服器。 */
   musicCycle: number;
   musicPlaybackRate: number;
+  /** 這段 LOOK_AWAY 從音檔哪個位置開始播（音檔原速 ms）；fake-out 假動作後接續播放用。 */
+  musicOffsetMs: number;
 }
 
 export interface RoomStateSnapshot {
@@ -70,6 +75,8 @@ export interface RoomStateSnapshot {
   roundDeadlineMs?: number;
   /** 主辦方為這一場設定的血量與玩家玩法。 */
   settings: RoomSettings;
+  /** 只在 PAUSED 時有值。 */
+  pausedReason?: PausedReason;
 }
 
 export type StepResultMsg =
@@ -81,7 +88,9 @@ export type StepResultMsg =
       finished: boolean;
       finishedAtMs?: number;
     }
-  | { kind: "locked"; remainingMs: number };
+  | { kind: "locked"; remainingMs: number }
+  /** 鬼剛開始審視的判定寬容期內踩的腳：不前進、不扣分。 */
+  | { kind: "ignored" };
 
 // ---------- Client -> Server（皆用 ack 回覆） ----------
 
@@ -158,6 +167,7 @@ export interface RoomPhaseChangedPayload {
   roundDeadlineMs?: number;
   /** 主辦方為這一場設定的血量與玩家玩法。 */
   settings: RoomSettings;
+  pausedReason?: PausedReason;
 }
 
 export interface RoomStartCountdownPayload {
@@ -165,10 +175,29 @@ export interface RoomStartCountdownPayload {
   durationMs: number;
 }
 
-export interface RoomPlayerSteppedPayload {
+/** 一位玩家在上一個 tick 內的最新進度。踩腳者自己的結果走 player:step 的 ack，不等這個批次。 */
+export interface PlayerProgressUpdate {
   playerId: PlayerId;
-  foot: Foot;
-  result: StepResultMsg;
+  distance: number;
+  score: number;
+  eliminated: boolean;
+  finished: boolean;
+  finishedAtMs?: number;
+  /** 這個 tick 內被抓到幾次（0 就省略），主控台用來放特效與跑馬燈。 */
+  caught?: number;
+}
+
+/**
+ * 伺服器每個 tick（SERVER_TICK_MS）合併一次所有玩家的進度再廣播，取代每踩一步就廣播給全房間。
+ * 感應模式的手機不畫其他玩家，這個事件只送給主控台。
+ */
+export interface RoomPlayersProgressPayload {
+  updates: PlayerProgressUpdate[];
+}
+
+export type TimeSyncPayload = Record<string, never>;
+export interface TimeSyncAck {
+  serverNowMs: number;
 }
 
 export interface RoomPlayerConnectionChangedPayload {
@@ -206,14 +235,14 @@ export const SOCKET_EVENTS = {
   playerJoinRoom: "player:joinRoom",
   playerResumeRoom: "player:resumeRoom",
   playerStep: "player:step",
+  timeSync: "time:sync",
 
   roomState: "room:state",
   roomStartCountdown: "room:startCountdown",
-  roomPlayerJoined: "room:playerJoined",
   roomPlayerLeft: "room:playerLeft",
   roomPhaseChanged: "room:phaseChanged",
   ghostStateChanged: "ghost:stateChanged",
-  roomPlayerStepped: "room:playerStepped",
+  roomPlayersProgress: "room:playersProgress",
   roomPlayerConnectionChanged: "room:playerConnectionChanged",
   roomPlayerBoostChanged: "room:playerBoostChanged",
   roomGameOver: "room:gameOver",

@@ -5,8 +5,8 @@ import { broadcastSnapshot } from "./broadcast";
 import type { SocketSessionData } from "./socketSession";
 
 /**
- * 斷線時：玩家標記 connected=false 並凍結分數/距離；主辦方斷線不會自動暫停遊戲，
- * 只是主控台暫時看不到畫面（見 PRD 19 章與規劃文件的預設判斷）。
+ * 斷線時：玩家標記 connected=false 並凍結分數/距離；主辦方斷線先記錄時間，
+ * 若遊戲進行中且超過 HOST_DISCONNECT_PAUSE_MS 還沒重連，GameRoom.tick() 會自動暫停。
  */
 export function registerDisconnectHandler(io: Server, socket: Socket, roomManager: RoomManager): void {
   socket.on("disconnect", () => {
@@ -22,7 +22,8 @@ export function registerDisconnectHandler(io: Server, socket: Socket, roomManage
       io.to(room.code).emit(SOCKET_EVENTS.roomPlayerConnectionChanged, { playerId, connected: false });
       broadcastSnapshot(io, room, now);
     } else if (role === "host") {
-      room.markHostDisconnected(socket.id);
+      // 遊戲進行中主控台斷線超過 HOST_DISCONNECT_PAUSE_MS 會由 tick() 自動暫停（音樂只從主控台播放）。
+      room.markHostDisconnected(socket.id, now);
     }
   });
 }

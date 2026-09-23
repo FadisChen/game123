@@ -18,5 +18,7 @@ npm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 .idea
-graphify-out/cache/
+graphify-out/
 .playwright/
+# One-off local scripts
+.tmp-*
