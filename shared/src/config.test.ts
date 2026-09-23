@@ -33,3 +33,24 @@ test("missing, non-numeric and invalid distances fall back to the default", () =
     );
   }
 });
+
+test("grace window and rhythm mode accept only the listed options", () => {
+  assert.equal(DEFAULT_ROOM_SETTINGS.graceMs, 500);
+  assert.equal(DEFAULT_ROOM_SETTINGS.rhythmMode, "classic");
+  assert.equal(normalizeRoomSettings({ graceMs: 800 }).graceMs, 800);
+  assert.equal(normalizeRoomSettings({ graceMs: 0 }).graceMs, 0);
+  assert.equal(normalizeRoomSettings({ graceMs: 5000 }).graceMs, 500);
+  assert.equal(normalizeRoomSettings({ graceMs: "300" }).graceMs, 500);
+  assert.equal(
+    normalizeRoomSettings({ rhythmMode: "fake-out" }).rhythmMode,
+    "fake-out",
+  );
+  assert.equal(
+    normalizeRoomSettings({ rhythmMode: "random-cut" }).rhythmMode,
+    "random-cut",
+  );
+  assert.equal(
+    normalizeRoomSettings({ rhythmMode: "chaos" }).rhythmMode,
+    "classic",
+  );
+});

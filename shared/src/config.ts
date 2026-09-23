@@ -2,11 +2,25 @@
 
 export type PlayerMode = "main" | "motion";
 
+/**
+ * 音樂節奏變化：
+ * - classic：每輪完整播完「一二三木頭人」才回頭。
+ * - random-cut：音樂在隨機時間點中斷，鬼立刻回頭，節奏不容易被摸透。
+ * - fake-out：偶爾在音樂中途停頓並假裝回頭（不判定），接著從中斷處繼續播放。
+ */
+export type RhythmMode = "classic" | "random-cut" | "fake-out";
+
 /** 主辦方在 WAITING 階段可以決定的每場設定。 */
 export interface RoomSettings {
   maxScore: number;
   playerMode: PlayerMode;
   finishDistanceM: number;
+  /**
+   * 鬼進入 LOOKING 後的判定寬容期（ms）：這段時間內收到的踩腳一律忽略（不前進也不扣分），
+   * 用來吸收會場音響延遲與手機網路延遲，避免「音樂最後一拍還在動」的人被冤枉。
+   */
+  graceMs: number;
+  rhythmMode: RhythmMode;
 }
 
 export const SCORE_OPTIONS = [1, 2, 3] as const;
@@ -14,11 +28,19 @@ export const PLAYER_MODE_OPTIONS = [
   "main",
   "motion",
 ] as const satisfies readonly PlayerMode[];
+export const GRACE_OPTIONS_MS = [0, 300, 500, 800] as const;
+export const RHYTHM_MODE_OPTIONS = [
+  "classic",
+  "random-cut",
+  "fake-out",
+] as const satisfies readonly RhythmMode[];
 export const FINISH_DISTANCE_M = 30;
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   maxScore: 3,
   playerMode: "main",
   finishDistanceM: FINISH_DISTANCE_M,
+  graceMs: 500,
+  rhythmMode: "classic",
 };
 
 /** 主辦方送來的設定不可信（可能來自竄改過的 client），超出允許範圍一律退回預設值。 */
@@ -39,6 +61,12 @@ export function normalizeRoomSettings(input: unknown): RoomSettings {
       Number.isFinite(distance) && distance >= 0.1
         ? distance
         : FINISH_DISTANCE_M,
+    graceMs:
+      GRACE_OPTIONS_MS.find((option) => option === raw.graceMs) ??
+      DEFAULT_ROOM_SETTINGS.graceMs,
+    rhythmMode:
+      RHYTHM_MODE_OPTIONS.find((option) => option === raw.rhythmMode) ??
+      DEFAULT_ROOM_SETTINGS.rhythmMode,
   };
 }
 
@@ -56,6 +84,16 @@ export const MUSIC_MAX_PLAYBACK_RATE = 2;
 export const MUSIC_LOOKING_MIN_MS = 3000;
 export const MUSIC_LOOKING_MAX_MS = 6000;
 export const GHOST_TURN_DURATION_MS = 260;
+
+// random-cut：音樂播放到整首的這個比例區間內隨機中斷。
+export const RANDOM_CUT_MIN_RATIO = 0.45;
+export const RANDOM_CUT_MAX_RATIO = 1;
+// fake-out：每輪（第一輪除外）有這個機率在音樂中途停頓、假裝回頭；停頓點落在整首的這個比例區間。
+export const FAKE_OUT_CHANCE = 0.4;
+export const FAKE_OUT_MIN_RATIO = 0.3;
+export const FAKE_OUT_MAX_RATIO = 0.7;
+/** 假動作回頭的單程時間，比真的回頭慢一點，讓大螢幕上看得出「鬼在猶豫」。 */
+export const FAKE_OUT_TURN_MS = 450;
 
 export function musicPlaybackRate(cycle: number): number {
   const steppedRate =
@@ -88,6 +126,8 @@ export const ROOM_CODE_LENGTH = 4;
 export const STEP_RATE_LIMIT_WINDOW_MS = 1000;
 export const MAX_STEP_EVENTS_PER_WINDOW = 10;
 export const START_COUNTDOWN_MS = 3000;
+/** 主辦方（音樂來源）斷線超過這個時間就自動暫停，避免全場聽不到音樂時鬼照樣回頭抓人。 */
+export const HOST_DISCONNECT_PAUSE_MS = 2000;
 
 // 色票（對應使用者提供的美術參考圖）
 export const COLORS = {

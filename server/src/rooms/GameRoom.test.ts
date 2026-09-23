@@ -4,6 +4,7 @@ import {
   DEFAULT_ROOM_SETTINGS,
   GHOST_TURN_DURATION_MS,
   HIT_LOCKOUT_MS,
+  HOST_DISCONNECT_PAUSE_MS,
   MAX_GAME_DURATION_MS,
   MUSIC_LOOKING_MIN_MS,
   MUSIC_TRACK_DURATION_MS,
@@ -22,6 +23,8 @@ const PLAYING_STARTS_AT = 0;
 const LOOK_AWAY_1_END = PLAYING_STARTS_AT + MUSIC_TRACK_DURATION_MS;
 const TURNING_TO_LOOK_END = LOOK_AWAY_1_END + GHOST_TURN_DURATION_MS;
 const LOOKING_END = TURNING_TO_LOOK_END + MUSIC_LOOKING_MIN_MS;
+/** 判定寬容期過後、鬼真正開始抓人的時間點（寬容期內的踩腳會被忽略）。 */
+const JUDGING_STARTS_AT = TURNING_TO_LOOK_END + DEFAULT_ROOM_SETTINGS.graceMs;
 const TURNING_AWAY_END = LOOKING_END + GHOST_TURN_DURATION_MS;
 
 /**
@@ -139,7 +142,7 @@ test("a step during the LOOKING window is judged as caught, driven purely by tic
   ]); // -> LOOKING
   assert.equal(room.ghost?.getState(), "LOOKING");
 
-  const outcome = room.applyStep("p1", "left", TURNING_TO_LOOK_END + 100);
+  const outcome = room.applyStep("p1", "left", JUDGING_STARTS_AT + 100);
   assert.ok(outcome.ok);
   if (outcome.ok) {
     assert.deepEqual(outcome.result, {
@@ -160,7 +163,7 @@ test("being caught starts a lockout window where further steps are ignored (no s
   room.tick(LOOK_AWAY_1_END);
   room.tick(TURNING_TO_LOOK_END); // -> LOOKING
 
-  const caughtAt = TURNING_TO_LOOK_END + 100;
+  const caughtAt = JUDGING_STARTS_AT + 100;
   const caught = room.applyStep("p1", "left", caughtAt);
   assert.ok(caught.ok);
   if (caught.ok) {
@@ -198,7 +201,7 @@ test("pausing and resuming shifts a pending hit-lockout so it doesn't expire ear
   room.tick(LOOK_AWAY_1_END);
   room.tick(TURNING_TO_LOOK_END); // -> LOOKING
 
-  const caughtAt = TURNING_TO_LOOK_END + 100;
+  const caughtAt = JUDGING_STARTS_AT + 100;
   room.applyStep("p1", "left", caughtAt); // starts a HIT_LOCKOUT_MS lockout
 
   room.pause(caughtAt + 500); // only 500ms of the lockout has elapsed
@@ -226,7 +229,7 @@ test("three catches eliminate the sole player and conclude the game as all-elimi
 
   // Each catch now opens a HIT_LOCKOUT_MS lockout, which outlasts the rest of that LOOKING window,
   // so the next two catches each have to wait for the ghost to cycle all the way back to LOOKING.
-  let now = TURNING_TO_LOOK_END + 100;
+  let now = JUDGING_STARTS_AT + 100;
   room.applyStep("p1", "left", now);
   const waitForNextLookingWindow = (): void => {
     const stateBeforeWait = room.ghost?.getState();
@@ -238,6 +241,9 @@ test("three catches eliminate the sole player and conclude the game as all-elimi
       now += 100;
       room.tick(now);
     }
+    // 跳過判定寬容期，否則這一步會被忽略而不是被抓。
+    now += DEFAULT_ROOM_SETTINGS.graceMs + 100;
+    room.tick(now);
   };
 
   waitForNextLookingWindow();
@@ -558,7 +564,7 @@ test("a maxScore of 1 room eliminates a player on their first catch", () => {
   for (const at of [PLAYING_STARTS_AT, LOOK_AWAY_1_END, TURNING_TO_LOOK_END])
     room.tick(at);
 
-  const caught = room.applyStep("p1", "left", TURNING_TO_LOOK_END + 100);
+  const caught = room.applyStep("p1", "left", JUDGING_STARTS_AT + 100);
   assert.ok(caught.ok);
   if (caught.ok)
     assert.deepEqual(caught.result, {
@@ -652,4 +658,101 @@ test("clientSeq makes retries idempotent and limits accepted steps per second", 
     error: "RATE_LIMITED",
   });
   assert.deepEqual(room.applyStep("p1", "right", 1200, 10).ok, true);
+});
+
+test("steps inside the grace window after the ghost turns are ignored, not caught", () => {
+  const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
+  for (const at of [PLAYING_STARTS_AT, LOOK_AWAY_1_END, TURNING_TO_LOOK_END])
+    room.tick(at);
+  assert.equal(room.ghost!.getState(), "LOOKING");
+
+  const inGrace = room.applyStep("p1", "left", TURNING_TO_LOOK_END + 100);
+  assert.ok(inGrace.ok);
+  if (inGrace.ok) assert.deepEqual(inGrace.result, { kind: "ignored" });
+  const p1 = room.players.get("p1")!.player;
+  assert.equal(p1.score, DEFAULT_ROOM_SETTINGS.maxScore);
+  assert.equal(p1.distance, 0);
+  assert.equal(p1.lastFoot, null, "an ignored step does not consume the foot");
+
+  const judged = room.applyStep("p1", "left", JUDGING_STARTS_AT);
+  assert.ok(judged.ok);
+  if (judged.ok) assert.equal(judged.result.kind, "caught");
+});
+
+test("a grace window of 0 judges from the first millisecond of LOOKING", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
+  room.join("p1", "Alice");
+  room.updateSettings({ ...DEFAULT_ROOM_SETTINGS, graceMs: 0 });
+  room.startGame(0);
+  for (const at of [PLAYING_STARTS_AT, LOOK_AWAY_1_END, TURNING_TO_LOOK_END])
+    room.tick(at);
+  const outcome = room.applyStep("p1", "left", TURNING_TO_LOOK_END);
+  assert.ok(outcome.ok);
+  if (outcome.ok) assert.equal(outcome.result.kind, "caught");
+});
+
+test("the room auto-pauses when the host (music source) stays disconnected", () => {
+  const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
+  room.attachHostSocket("host-socket");
+  room.tick(1000);
+  assert.ok(room.markHostDisconnected("host-socket", 1000));
+
+  assert.deepEqual(
+    boostEventsOnly(room.tick(1000 + HOST_DISCONNECT_PAUSE_MS - 100)),
+    [],
+  );
+  assert.equal(room.phase, "PLAYING");
+
+  const events = room.tick(1000 + HOST_DISCONNECT_PAUSE_MS);
+  assert.ok(events.some((event) => event.type === "phaseChanged"));
+  assert.equal(room.phase, "PAUSED");
+  assert.equal(room.toSnapshot(4000).pausedReason, "host-disconnected");
+
+  // 主控台重新連上後不會自動恢復，要主持人確認音樂正常後手動按「繼續」。
+  room.attachHostSocket("host-socket-2");
+  room.tick(10_000);
+  assert.equal(room.phase, "PAUSED");
+  assert.ok(room.resume(10_000).ok);
+  assert.equal(room.toSnapshot(10_000).pausedReason, undefined);
+});
+
+test("a host that reconnects within the grace period keeps the game running", () => {
+  const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
+  room.attachHostSocket("host-socket");
+  room.markHostDisconnected("host-socket", 1000);
+  room.attachHostSocket("host-socket-2");
+  room.tick(1000 + HOST_DISCONNECT_PAUSE_MS * 2);
+  assert.equal(room.phase, "PLAYING");
+});
+
+test("manual pauses report the host as the reason", () => {
+  const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(0.9));
+  room.pause(100);
+  assert.equal(room.toSnapshot(100).pausedReason, "host");
+});
+
+test("progress is batched per player until drained", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(0.9));
+  room.join("p1", "Alice");
+  room.join("p2", "Bob");
+  room.startGame(0);
+  room.tick(PLAYING_STARTS_AT);
+  room.applyStep("p1", "left", 10);
+  room.applyStep("p1", "right", 20);
+  room.applyStep("p1", "right", 30); // rejected-no-alternate：沒有進度
+  room.applyStep("p2", "left", 40);
+
+  const updates = room.drainProgress();
+  assert.equal(updates.length, 2);
+  const p1 = updates.find((u) => u.playerId === "p1")!;
+  assert.equal(p1.distance, STEP_DISTANCE_M * 2);
+  assert.equal(p1.caught, undefined);
+  assert.deepEqual(room.drainProgress(), []);
+
+  for (const at of [LOOK_AWAY_1_END, TURNING_TO_LOOK_END]) room.tick(at);
+  room.applyStep("p2", "right", JUDGING_STARTS_AT);
+  const [caught] = room.drainProgress();
+  assert.equal(caught.playerId, "p2");
+  assert.equal(caught.caught, 1);
+  assert.equal(caught.score, DEFAULT_ROOM_SETTINGS.maxScore - 1);
 });

@@ -7,6 +7,7 @@
  * 用法（先在另一個終端機用 `npm run dev -w server` 或 `npm run start -w server` 啟動伺服器）：
  *   node scripts/load-test.mjs
  *   LOAD_TEST_PLAYERS=150 LOAD_TEST_PLAY_MS=60000 node scripts/load-test.mjs
+ *   LOAD_TEST_SERVER_URL=https://<正式網址> LOAD_TEST_PLAYERS=60 node scripts/load-test.mjs   # 對正式環境
  */
 import { io } from "socket.io-client";
 
@@ -103,13 +104,19 @@ async function main() {
 
   const broadcastLatencies = [];
   const pendingBroadcastAt = new Map();
-  host.on("room:playerStepped", (payload) => {
-    const t0 = pendingBroadcastAt.get(payload.playerId);
-    if (t0 !== undefined) {
-      broadcastLatencies.push(performance.now() - t0);
-      pendingBroadcastAt.delete(payload.playerId);
+  // 進度改成每個 tick 合併一包送出，所以量到的延遲包含最多一個 tick（100ms）的合併等待。
+  host.on("room:playersProgress", ({ updates }) => {
+    const now = performance.now();
+    for (const update of updates) {
+      const t0 = pendingBroadcastAt.get(update.playerId);
+      if (t0 === undefined) continue;
+      broadcastLatencies.push(now - t0);
+      pendingBroadcastAt.delete(update.playerId);
     }
   });
+  // 統計每支玩家手機在踩腳期間總共收到幾則伺服器訊息，觀察廣播流量。
+  let playerMessagesReceived = 0;
+  for (const p of players) p.socket.onAny(() => playerMessagesReceived++);
 
   let clientSeq = 0;
   const playEnd = Date.now() + PLAY_DURATION_MS;
@@ -130,7 +137,10 @@ async function main() {
     "player:step ack 延遲",
     players.flatMap((p) => p.stepLatencies),
   );
-  printStats("room:playerStepped 廣播到主控台的延遲", broadcastLatencies);
+  printStats("room:playersProgress 批次廣播到主控台的延遲", broadcastLatencies);
+  console.log(
+    `玩家端平均每人每秒收到 ${(playerMessagesReceived / players.length / (PLAY_DURATION_MS / 1000)).toFixed(1)} 則廣播`,
+  );
 
   await emitAck(host, "host:endGame", {});
 

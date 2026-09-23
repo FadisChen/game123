@@ -16,15 +16,15 @@ import {
   type PlayerResumeRoomPayload,
   type PlayerStepAck,
   type PlayerStepPayload,
-  type PlayerSummary,
   type RoomClosedPayload,
   type RoomGameOverPayload,
   type RoomPhaseChangedPayload,
   type RoomPlayerBoostChangedPayload,
   type RoomPlayerConnectionChangedPayload,
-  type RoomPlayerSteppedPayload,
+  type RoomPlayersProgressPayload,
   type RoomStartCountdownPayload,
   type RoomStateSnapshot,
+  type TimeSyncAck,
 } from "shared";
 
 const PLAYER_SESSION_KEY = "123-doll-player-session";
@@ -231,12 +231,14 @@ export class SocketClient {
   step(payload: PlayerStepPayload): Promise<PlayerStepAck> {
     return this.emitAck(SOCKET_EVENTS.playerStep, payload);
   }
+  /** 回傳伺服器當下時間，供 ClockSync 量測來回延遲。 */
+  async serverNow(): Promise<number> {
+    const ack = await this.emitAck<Record<string, never>, TimeSyncAck>(SOCKET_EVENTS.timeSync, {});
+    return ack.serverNowMs;
+  }
 
   onRoomState(cb: (snapshot: RoomStateSnapshot) => void): void {
     this.socket.on(SOCKET_EVENTS.roomState, cb);
-  }
-  onPlayerJoined(cb: (payload: { player: PlayerSummary }) => void): void {
-    this.socket.on(SOCKET_EVENTS.roomPlayerJoined, cb);
   }
   onPlayerLeft(cb: (payload: { playerId: string }) => void): void {
     this.socket.on(SOCKET_EVENTS.roomPlayerLeft, cb);
@@ -250,8 +252,8 @@ export class SocketClient {
   onGhostStateChanged(cb: (payload: GhostVisualState) => void): void {
     this.socket.on(SOCKET_EVENTS.ghostStateChanged, cb);
   }
-  onPlayerStepped(cb: (payload: RoomPlayerSteppedPayload) => void): void {
-    this.socket.on(SOCKET_EVENTS.roomPlayerStepped, cb);
+  onPlayersProgress(cb: (payload: RoomPlayersProgressPayload) => void): void {
+    this.socket.on(SOCKET_EVENTS.roomPlayersProgress, cb);
   }
   onPlayerConnectionChanged(cb: (payload: RoomPlayerConnectionChangedPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomPlayerConnectionChanged, cb);

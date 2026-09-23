@@ -40,8 +40,11 @@ test("player keyboard and touch share stepping rules; portrait and paused play b
       if (text.includes('["player:step",')) sent.push(JSON.parse(text.slice(text.indexOf("[")))[1].foot);
     });
     socket.on("framereceived", ({ payload }) => {
+      // 自己的踩腳結果改走 player:step 的 ack（Socket.IO ack 封包以 "43<id>" 開頭）。
       const text = String(payload);
-      if (text.includes('["room:playerStepped",')) results.push(JSON.parse(text.slice(text.indexOf("[")))[1].result.kind);
+      if (!/^43\d+\[/.test(text)) return;
+      const [ack] = JSON.parse(text.slice(text.indexOf("[")));
+      if (ack?.ok && ack.result?.kind) results.push(ack.result.kind);
     });
   });
   try {

@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GhostAI, GhostReplicaAI, computeFacingAmount } from "./GhostAI";
 import {
+  FAKE_OUT_MIN_RATIO,
+  FAKE_OUT_TURN_MS,
   GHOST_TURN_DURATION_MS,
+  RANDOM_CUT_MIN_RATIO,
   MUSIC_LOOKING_MIN_MS,
   MUSIC_LOOKING_MAX_MS,
   MUSIC_TRACK_DURATION_MS,
@@ -113,4 +116,76 @@ test("GhostReplicaAI mirrors server-provided state without ever judging anything
   assert.equal(replica.getFacingPlayerAmount(2200), 0.5);
   assert.equal(replica.getMusicCycle(), 0);
   assert.equal(replica.getMusicPlaybackRate(), 1);
+});
+
+test("classic rhythm never consumes rng for the music phase", () => {
+  let calls = 0;
+  const ghost = new GhostAI(0, () => {
+    calls += 1;
+    return 0;
+  });
+  assert.equal(ghost.getStateDuration(), MUSIC_TRACK_DURATION_MS);
+  assert.equal(calls, 0);
+});
+
+test("random-cut shortens the music phase to a random share of the track", () => {
+  const ghost = new GhostAI(0, scriptedRng([0]), "random-cut");
+  assert.equal(ghost.getState(), "LOOK_AWAY");
+  assert.equal(
+    ghost.getStateDuration(),
+    Math.round(MUSIC_TRACK_DURATION_MS * RANDOM_CUT_MIN_RATIO),
+  );
+  assert.equal(ghost.getMusicOffsetMs(), 0);
+
+  const full = new GhostAI(0, scriptedRng([0.999999]), "random-cut");
+  assert.ok(full.getStateDuration() <= MUSIC_TRACK_DURATION_MS);
+  assert.ok(full.getStateDuration() > MUSIC_TRACK_DURATION_MS * 0.99);
+});
+
+test("fake-out turns around without LOOKING and resumes the music where it stopped", () => {
+  // 第一輪不排假動作；rng：審視時間 0 → 第二輪擲假動作（0 < 機率）→ 停頓點比例 0。
+  const ghost = new GhostAI(0, scriptedRng([0, 0, 0]), "fake-out");
+  let now = 0;
+  const advance = () => {
+    now = ghost.getStateStartedAt() + ghost.getStateDuration();
+    ghost.update(now);
+  };
+  assert.equal(ghost.getStateDuration(), MUSIC_TRACK_DURATION_MS);
+  advance(); // TURNING_TO_LOOK
+  advance(); // LOOKING
+  assert.equal(ghost.getState(), "LOOKING");
+  advance(); // TURNING_AWAY
+  advance(); // LOOK_AWAY（第二輪，排了假動作）
+  assert.equal(ghost.getState(), "LOOK_AWAY");
+  assert.equal(ghost.getMusicCycle(), 1);
+  const fullMs = musicPhaseDurationMs(1);
+  const firstPart = Math.round(fullMs * FAKE_OUT_MIN_RATIO);
+  assert.equal(ghost.getStateDuration(), firstPart);
+
+  advance();
+  assert.equal(ghost.getState(), "TURNING_TO_LOOK");
+  assert.equal(ghost.isFakeOut(), true);
+  assert.equal(ghost.getStateDuration(), FAKE_OUT_TURN_MS);
+  advance();
+  assert.equal(ghost.getState(), "TURNING_AWAY");
+  assert.equal(ghost.isLooking(), false);
+  advance();
+  assert.equal(ghost.getState(), "LOOK_AWAY");
+  assert.equal(ghost.isFakeOut(), false);
+  assert.equal(
+    ghost.getMusicCycle(),
+    1,
+    "a fake-out does not start a new cycle",
+  );
+  assert.equal(ghost.getStateDuration(), fullMs - firstPart);
+  assert.equal(
+    ghost.getMusicOffsetMs(),
+    Math.round(firstPart * musicPlaybackRate(1)),
+  );
+
+  advance();
+  assert.equal(ghost.getState(), "TURNING_TO_LOOK");
+  assert.equal(ghost.isFakeOut(), false);
+  advance();
+  assert.equal(ghost.getState(), "LOOKING");
 });

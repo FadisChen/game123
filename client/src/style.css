@@ -1014,3 +1014,117 @@ kbd {
     transition: none !important;
   }
 }
+
+/* ---------- 主辦方大螢幕效果（HostStageOverlay） ---------- */
+.stage-banner {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 12;
+  transform: translateX(-50%);
+  padding: 10px 34px;
+  border-radius: 999px;
+  font:
+    800 clamp(28px, 6vh, 64px) / 1.1 "Microsoft JhengHei",
+    "PingFang TC",
+    sans-serif;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+.stage-banner[hidden] {
+  display: none;
+}
+.stage-banner[data-status="go"] {
+  color: #10281c;
+  background: #8deab0;
+}
+.stage-banner[data-status="freeze"] {
+  color: #fff;
+  background: #e0403c;
+  animation: stage-banner-pulse 0.6s ease-in-out infinite alternate;
+}
+.stage-banner[data-status="paused"] {
+  color: #20272b;
+  background: #e7c17d;
+}
+@keyframes stage-banner-pulse {
+  from {
+    transform: translateX(-50%) scale(1);
+  }
+  to {
+    transform: translateX(-50%) scale(1.06);
+  }
+}
+.stage-ticker {
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+.stage-ticker li {
+  padding: 8px 16px;
+  border-left: 5px solid #e7a342;
+  border-radius: 6px;
+  background: #1c2325e6;
+  font-size: clamp(16px, 2.6vh, 26px);
+  font-weight: 700;
+  animation: stage-ticker-in 220ms ease-out;
+}
+.stage-ticker li[data-variant="out"] {
+  border-left-color: #ef4f4a;
+}
+.stage-ticker li[data-variant="finish"] {
+  border-left-color: #8deab0;
+}
+@keyframes stage-ticker-in {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+.stage-top3 {
+  position: absolute;
+  top: 104px;
+  left: 24px;
+  z-index: 12;
+  min-width: 220px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #20292cdc;
+  list-style: none;
+  pointer-events: none;
+}
+.stage-top3[hidden] {
+  display: none;
+}
+.stage-top3 li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: clamp(15px, 2.2vh, 22px);
+}
+.stage-top3 strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-top3 li > span:last-child {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.avatar-label[hidden] {
+  display: none;
+}

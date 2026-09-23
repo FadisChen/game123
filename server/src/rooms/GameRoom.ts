@@ -2,6 +2,7 @@ import {
   DEFAULT_ROOM_SETTINGS,
   GhostAI,
   HIT_LOCKOUT_MS,
+  HOST_DISCONNECT_PAUSE_MS,
   MAX_STEP_EVENTS_PER_WINDOW,
   MAX_GAME_DURATION_MS,
   MAX_PLAYERS_PER_ROOM,
@@ -17,6 +18,8 @@ import {
   type Foot,
   type GameOverReason,
   type JoinErrorCode,
+  type PausedReason,
+  type PlayerProgressUpdate,
   type PlayerSummary,
   type RankedPlayer,
   type RoomPhase,
@@ -94,6 +97,8 @@ export class GameRoom {
   readonly hostId: string;
   private readonly hostSessionToken = createSessionToken();
   hostSocketId: string | null = null;
+  /** 主辦方斷線的時間點；超過 HOST_DISCONNECT_PAUSE_MS 仍未回來就在 tick() 自動暫停。 */
+  private hostDisconnectedAt: number | null = null;
 
   phase: RoomPhase = "WAITING";
   players = new Map<string, ServerPlayerState>();
@@ -101,6 +106,9 @@ export class GameRoom {
   settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS };
 
   private pausedAt: number | null = null;
+  private pausedReason: PausedReason | null = null;
+  /** 上次廣播後有變化的玩家進度，由外層 tick 迴圈呼叫 drainProgress() 一次送出。 */
+  private readonly pendingProgress = new Map<string, PlayerProgressUpdate>();
   private roundStartedAt: number | null = null;
   private roundDeadlineAt: number | null = null;
 
@@ -247,6 +255,7 @@ export class GameRoom {
 
   attachHostSocket(socketId: string): void {
     this.hostSocketId = socketId;
+    this.hostDisconnectedAt = null;
   }
 
   markPlayerDisconnected(
@@ -263,9 +272,10 @@ export class GameRoom {
     return true;
   }
 
-  markHostDisconnected(socketId?: string): boolean {
+  markHostDisconnected(socketId?: string, now?: number): boolean {
     if (socketId !== undefined && this.hostSocketId !== socketId) return false;
     this.hostSocketId = null;
+    this.hostDisconnectedAt = now ?? null;
     return true;
   }
 
@@ -276,11 +286,15 @@ export class GameRoom {
     return { ok: true };
   }
 
-  pause(now: number): { ok: true } | { ok: false; error: string } {
+  pause(
+    now: number,
+    reason: PausedReason = "host",
+  ): { ok: true } | { ok: false; error: string } {
     if (this.phase !== "PLAYING")
       return { ok: false, error: "ROOM_NOT_PLAYING" };
     this.phase = "PAUSED";
     this.pausedAt = now;
+    this.pausedReason = reason;
     return { ok: true };
   }
 
@@ -296,6 +310,7 @@ export class GameRoom {
       if (p.hitLockedUntil !== null) p.hitLockedUntil += delta;
     }
     this.pausedAt = null;
+    this.pausedReason = null;
     this.phase = "PLAYING";
     return { ok: true };
   }
@@ -336,6 +351,8 @@ export class GameRoom {
     this.roundStartedAt = null;
     this.roundDeadlineAt = null;
     this.pausedAt = null;
+    this.pausedReason = null;
+    this.pendingProgress.clear();
     return { ok: true };
   }
 
@@ -415,6 +432,18 @@ export class GameRoom {
       state.hitLockedUntil = null;
     }
 
+    if (
+      this.ghost.isLooking() &&
+      now - this.ghost.getStateStartedAt() < this.settings.graceMs
+    ) {
+      // 判定寬容期：音樂剛停、鬼剛轉過來的這一小段時間，會場音響與手機網路的延遲會讓
+      // 「最後一拍還在動」的踩腳晚到伺服器。這些踩腳直接忽略，不前進也不扣分。
+      const ignoredResult: StepResultMsg = { kind: "ignored" };
+      if (clientSeq !== undefined)
+        state.lastStepResult = { clientSeq, result: ignoredResult };
+      return { ok: true, result: ignoredResult, ghostChanged, concluded: null };
+    }
+
     const multiplier = this.isPlayerBoosted(state, now)
       ? SPEED_BOOST_MULTIPLIER
       : 1;
@@ -425,6 +454,9 @@ export class GameRoom {
     }
     if (result.kind === "caught") {
       state.hitLockedUntil = now + HIT_LOCKOUT_MS;
+    }
+    if (result.kind === "advanced" || result.kind === "caught") {
+      this.recordProgress(state, result.kind === "caught");
     }
 
     const concluded = this.checkForConclusion(now);
@@ -439,6 +471,31 @@ export class GameRoom {
       ghostChanged,
       concluded,
     };
+  }
+
+  private recordProgress(state: ServerPlayerState, caught: boolean): void {
+    const previousCaught =
+      this.pendingProgress.get(state.playerId)?.caught ?? 0;
+    const caughtCount = previousCaught + (caught ? 1 : 0);
+    this.pendingProgress.set(state.playerId, {
+      playerId: state.playerId,
+      distance: state.player.distance,
+      score: state.player.score,
+      eliminated: state.player.eliminated,
+      finished: state.player.finished,
+      ...(state.finishedAtMs !== undefined
+        ? { finishedAtMs: state.finishedAtMs }
+        : {}),
+      ...(caughtCount > 0 ? { caught: caughtCount } : {}),
+    });
+  }
+
+  /** 取出並清空自上次呼叫以來累積的玩家進度（每位玩家只留最新一筆）。 */
+  drainProgress(): PlayerProgressUpdate[] {
+    if (this.pendingProgress.size === 0) return [];
+    const updates = [...this.pendingProgress.values()];
+    this.pendingProgress.clear();
+    return updates;
   }
 
   /** 由外層的全域 tick 迴圈每 SERVER_TICK_MS 呼叫一次，推進鬼的狀態/斷線寬限期/時間上限。 */
@@ -461,6 +518,17 @@ export class GameRoom {
           timedOut: true,
         });
       }
+    }
+
+    if (
+      this.phase === "PLAYING" &&
+      this.hostSocketId === null &&
+      this.hostDisconnectedAt !== null &&
+      now - this.hostDisconnectedAt >= HOST_DISCONNECT_PAUSE_MS
+    ) {
+      // 音樂只從主控台播放；主控台斷線時全場聽不到音樂，鬼卻照樣回頭，一定會大量誤判。
+      this.pause(now, "host-disconnected");
+      events.push({ type: "phaseChanged" });
     }
 
     if (this.phase === "PLAYING" && this.ghost) {
@@ -516,7 +584,7 @@ export class GameRoom {
 
   private beginPlaying(now: number): void {
     this.phase = "PLAYING";
-    this.ghost = new GhostAI(now, this.rng);
+    this.ghost = new GhostAI(now, this.rng, this.settings.rhythmMode);
     this.roundStartedAt = now;
     this.roundDeadlineAt = now + MAX_GAME_DURATION_MS;
     for (const p of this.players.values()) {
@@ -583,12 +651,16 @@ export class GameRoom {
             stateDurationMs: this.ghost.getStateDuration(),
             musicCycle: this.ghost.getMusicCycle(),
             musicPlaybackRate: this.ghost.getMusicPlaybackRate(),
+            musicOffsetMs: this.ghost.getMusicOffsetMs(),
           }
         : null,
       serverNowMs: now,
       roundStartedAtMs: this.roundStartedAt ?? undefined,
       roundDeadlineMs: this.roundDeadlineAt ?? undefined,
       settings: this.settings,
+      ...(this.phase === "PAUSED" && this.pausedReason
+        ? { pausedReason: this.pausedReason }
+        : {}),
     };
   }
 

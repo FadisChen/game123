@@ -187,6 +187,7 @@ export class GameController {
       stateDurationMs: this.ghost.getStateDuration(),
       musicCycle: this.ghost.getMusicCycle(),
       musicPlaybackRate: this.ghost.getMusicPlaybackRate(),
+      musicOffsetMs: this.ghost.getMusicOffsetMs(),
     };
   }
 }

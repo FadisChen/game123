@@ -8,7 +8,7 @@ import {
 } from "shared";
 import type { RoomManager } from "../rooms/RoomManager";
 import { RateLimiter } from "../RateLimiter";
-import { broadcastGhostState, broadcastSnapshot } from "./broadcast";
+import { broadcastGhostState, broadcastSnapshot, flushProgress } from "./broadcast";
 import {
   isPlayerJoinRoomPayload,
   isPlayerResumeRoomPayload,
@@ -72,10 +72,7 @@ export function registerPlayerHandlers(
         playerSessionToken: room.getPlayerSessionToken(playerId)!,
         snapshot,
       });
-      const joinedSummary = snapshot.players.find((p) => p.playerId === playerId);
-      if (joinedSummary) {
-        io.to(room.code).emit(SOCKET_EVENTS.roomPlayerJoined, { player: joinedSummary });
-      }
+      // 完整快照已經包含新玩家，不再另外送 room:playerJoined（沒有任何客戶端使用，只是重複流量）。
       broadcastSnapshot(io, room, now);
     } catch {
       reply({ ok: false, error: "INVALID_PAYLOAD" });
@@ -143,15 +140,13 @@ export function registerPlayerHandlers(
         return;
       }
 
+      // 踩腳者自己的結果直接走 ack；其他人看到的進度由 tick 迴圈的 flushProgress() 每 100ms 合併送出。
       reply({ ok: true, result: outcome.result });
       if (outcome.duplicate) return;
-      io.to(session.room.code).emit(SOCKET_EVENTS.roomPlayerStepped, {
-        playerId: session.playerId,
-        foot: payload.foot,
-        result: outcome.result,
-      });
       if (outcome.ghostChanged) broadcastGhostState(io, session.room, now);
       if (outcome.concluded) {
+        // 結算前先把最後一批進度送出，讓主控台的終點畫面跟排名一致。
+        flushProgress(io, session.room);
         io.to(session.room.code).emit(SOCKET_EVENTS.roomGameOver, {
           ranking: session.room.getLastRanking(),
           reason: outcome.concluded,
