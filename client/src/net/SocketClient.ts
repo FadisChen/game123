@@ -13,6 +13,8 @@ import {
   type PlayerJoinRoomAck,
   type PlayerJoinRoomPayload,
   type PlayerResumeRoomAck,
+  type PlayerReactionAck,
+  type PlayerReactionPayload,
   type PlayerResumeRoomPayload,
   type PlayerStepAck,
   type PlayerStepPayload,
@@ -21,6 +23,7 @@ import {
   type RoomPhaseChangedPayload,
   type RoomPlayerBoostChangedPayload,
   type RoomPlayerConnectionChangedPayload,
+  type RoomPlayerReactionPayload,
   type RoomPlayersProgressPayload,
   type RoomStartCountdownPayload,
   type RoomStateSnapshot,
@@ -65,7 +68,9 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-export function getStoredPlayerSession(roomCode?: string): PlayerSession | null {
+export function getStoredPlayerSession(
+  roomCode?: string,
+): PlayerSession | null {
   const session = readJson<PlayerSession>(PLAYER_SESSION_KEY);
   if (
     !session ||
@@ -96,7 +101,12 @@ export function clearPlayerSession(): void {
 
 export function getStoredHostSession(): HostSession | null {
   const session = readJson<HostSession>(HOST_SESSION_KEY);
-  if (!session || !isNonEmptyString(session.roomCode) || !isNonEmptyString(session.sessionToken)) return null;
+  if (
+    !session ||
+    !isNonEmptyString(session.roomCode) ||
+    !isNonEmptyString(session.sessionToken)
+  )
+    return null;
   return session;
 }
 
@@ -118,7 +128,9 @@ export class SocketClient {
   private playerSession: PlayerSession | null = null;
   private hostSession: HostSession | null = null;
   private connectionState: ConnectionState = "connecting";
-  private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
+  private readonly connectionStateListeners = new Set<
+    (state: ConnectionState) => void
+  >();
   private readonly reconnectListeners = new Set<() => void | Promise<void>>();
 
   constructor() {
@@ -126,9 +138,15 @@ export class SocketClient {
     this.socket = io({ upgrade: true });
     this.socket.on("connect", () => this.setConnectionState("connected"));
     this.socket.on("disconnect", () => this.setConnectionState("disconnected"));
-    this.socket.on("connect_error", () => this.setConnectionState("reconnecting"));
-    this.socket.io.on("reconnect_attempt", () => this.setConnectionState("reconnecting"));
-    this.socket.io.on("reconnect_error", () => this.setConnectionState("reconnecting"));
+    this.socket.on("connect_error", () =>
+      this.setConnectionState("reconnecting"),
+    );
+    this.socket.io.on("reconnect_attempt", () =>
+      this.setConnectionState("reconnecting"),
+    );
+    this.socket.io.on("reconnect_error", () =>
+      this.setConnectionState("reconnecting"),
+    );
     this.socket.io.on("reconnect", () => {
       // transport 已恢復，但 room session 尚未 resume 完成；控制器在收到 resume ack 後才恢復操作。
       this.setConnectionState("reconnecting");
@@ -173,12 +191,17 @@ export class SocketClient {
   }
 
   resumeHostRoom(): Promise<HostResumeRoomAck> {
-    if (!this.hostSession) return Promise.resolve({ ok: false, error: "SESSION_INVALID" });
-    return this.resumeHost({ roomCode: this.hostSession.roomCode, sessionToken: this.hostSession.sessionToken });
+    if (!this.hostSession)
+      return Promise.resolve({ ok: false, error: "SESSION_INVALID" });
+    return this.resumeHost({
+      roomCode: this.hostSession.roomCode,
+      sessionToken: this.hostSession.sessionToken,
+    });
   }
 
   resumePlayerRoom(): Promise<PlayerResumeRoomAck> {
-    if (!this.playerSession) return Promise.resolve({ ok: false, error: "SESSION_INVALID" });
+    if (!this.playerSession)
+      return Promise.resolve({ ok: false, error: "SESSION_INVALID" });
     return this.resumePlayer({
       roomCode: this.playerSession.roomCode,
       playerId: this.playerSession.playerId,
@@ -186,12 +209,17 @@ export class SocketClient {
     });
   }
 
-  private emitAck<TPayload, TAck>(event: string, payload: TPayload): Promise<TAck> {
+  private emitAck<TPayload, TAck>(
+    event: string,
+    payload: TPayload,
+  ): Promise<TAck> {
     return new Promise((resolve, reject) => {
-      this.socket.timeout(REQUEST_TIMEOUT_MS).emit(event, payload, (error: Error | null, ack: TAck) => {
-        if (error) reject(error);
-        else resolve(ack);
-      });
+      this.socket
+        .timeout(REQUEST_TIMEOUT_MS)
+        .emit(event, payload, (error: Error | null, ack: TAck) => {
+          if (error) reject(error);
+          else resolve(ack);
+        });
     });
   }
 
@@ -219,7 +247,9 @@ export class SocketClient {
   restartGame(payload: HostRoomActionPayload): Promise<HostRoomActionAck> {
     return this.emitAck(SOCKET_EVENTS.hostRestartGame, payload);
   }
-  updateSettings(payload: HostUpdateSettingsPayload): Promise<HostRoomActionAck> {
+  updateSettings(
+    payload: HostUpdateSettingsPayload,
+  ): Promise<HostRoomActionAck> {
     return this.emitAck(SOCKET_EVENTS.hostUpdateSettings, payload);
   }
   joinRoom(payload: PlayerJoinRoomPayload): Promise<PlayerJoinRoomAck> {
@@ -231,9 +261,15 @@ export class SocketClient {
   step(payload: PlayerStepPayload): Promise<PlayerStepAck> {
     return this.emitAck(SOCKET_EVENTS.playerStep, payload);
   }
+  react(payload: PlayerReactionPayload): Promise<PlayerReactionAck> {
+    return this.emitAck(SOCKET_EVENTS.playerReaction, payload);
+  }
   /** 回傳伺服器當下時間，供 ClockSync 量測來回延遲。 */
   async serverNow(): Promise<number> {
-    const ack = await this.emitAck<Record<string, never>, TimeSyncAck>(SOCKET_EVENTS.timeSync, {});
+    const ack = await this.emitAck<Record<string, never>, TimeSyncAck>(
+      SOCKET_EVENTS.timeSync,
+      {},
+    );
     return ack.serverNowMs;
   }
 
@@ -255,14 +291,21 @@ export class SocketClient {
   onPlayersProgress(cb: (payload: RoomPlayersProgressPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomPlayersProgress, cb);
   }
-  onPlayerConnectionChanged(cb: (payload: RoomPlayerConnectionChangedPayload) => void): void {
+  onPlayerConnectionChanged(
+    cb: (payload: RoomPlayerConnectionChangedPayload) => void,
+  ): void {
     this.socket.on(SOCKET_EVENTS.roomPlayerConnectionChanged, cb);
   }
-  onPlayerBoostChanged(cb: (payload: RoomPlayerBoostChangedPayload) => void): void {
+  onPlayerBoostChanged(
+    cb: (payload: RoomPlayerBoostChangedPayload) => void,
+  ): void {
     this.socket.on(SOCKET_EVENTS.roomPlayerBoostChanged, cb);
   }
   onGameOver(cb: (payload: RoomGameOverPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomGameOver, cb);
+  }
+  onPlayerReaction(cb: (payload: RoomPlayerReactionPayload) => void): void {
+    this.socket.on(SOCKET_EVENTS.roomPlayerReaction, cb);
   }
   onClosed(cb: (payload: RoomClosedPayload) => void): void {
     this.socket.on(SOCKET_EVENTS.roomClosed, cb);

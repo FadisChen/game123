@@ -1,5 +1,6 @@
 import "./style.css";
 import "./game/game-ui.css";
+import "./party.css";
 import { JoinScreen } from "./ui/JoinScreen";
 import {
   clearPlayerSession,
@@ -76,7 +77,14 @@ if (new URLSearchParams(location.search).has("offline")) {
           nextClientSeq: 0,
         });
         joinScreen.remove();
-        new NetworkedGameController(app, socketClient, roomCode, ack.playerId, name, ack.snapshot);
+        new NetworkedGameController(
+          app,
+          socketClient,
+          roomCode,
+          ack.playerId,
+          name,
+          ack.snapshot,
+        );
       })
       .catch(() => {
         joinScreen.setBusy(false);
@@ -100,7 +108,10 @@ if (new URLSearchParams(location.search).has("offline")) {
           socketClient.disconnect();
           return;
         }
-        socketClient.setPlayerSession({ ...storedSession, sessionToken: ack.playerSessionToken });
+        socketClient.setPlayerSession({
+          ...storedSession,
+          sessionToken: ack.playerSessionToken,
+        });
         joinScreen.remove();
         new NetworkedGameController(
           app,

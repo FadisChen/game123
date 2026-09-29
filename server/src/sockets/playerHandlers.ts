@@ -4,19 +4,29 @@ import {
   SOCKET_EVENTS,
   type PlayerJoinRoomAck,
   type PlayerResumeRoomAck,
+  type PlayerReactionAck,
   type PlayerStepAck,
+  type RoomPlayerReactionPayload,
 } from "shared";
 import type { RoomManager } from "../rooms/RoomManager";
 import { RateLimiter } from "../RateLimiter";
-import { broadcastGhostState, broadcastSnapshot, flushProgress } from "./broadcast";
+import {
+  broadcastGhostState,
+  broadcastSnapshot,
+  flushProgress,
+} from "./broadcast";
 import {
   isPlayerJoinRoomPayload,
+  isPlayerReactionPayload,
   isPlayerResumeRoomPayload,
   isPlayerStepPayload,
   normalizeRoomCode,
   safeAck,
 } from "./validation";
-import { getAuthenticatedPlayerSession, setPlayerSession } from "./socketSession";
+import {
+  getAuthenticatedPlayerSession,
+  setPlayerSession,
+} from "./socketSession";
 
 function createPlayerId(roomManager: RoomManager, roomCode: string): string {
   const room = roomManager.getRoom(roomCode);
@@ -79,47 +89,54 @@ export function registerPlayerHandlers(
     }
   });
 
-  socket.on(SOCKET_EVENTS.playerResumeRoom, (payload: unknown, ack: unknown) => {
-    const reply = safeAck<PlayerResumeRoomAck>(ack);
-    try {
-      if (!isPlayerResumeRoomPayload(payload)) {
-        reply({ ok: false, error: "SESSION_INVALID" });
-        return;
-      }
-      if (socket.data.role) {
-        reply({ ok: false, error: "SESSION_INVALID" });
-        return;
-      }
-      const roomCode = normalizeRoomCode(payload.roomCode)!;
-      const room = roomManager.getRoom(roomCode);
-      if (!room) {
-        reply({ ok: false, error: "ROOM_NOT_FOUND" });
-        return;
-      }
-      const result = room.resumePlayer(payload.playerId, payload.sessionToken, socket.id);
-      if (!result.ok) {
-        reply(result);
-        return;
-      }
+  socket.on(
+    SOCKET_EVENTS.playerResumeRoom,
+    (payload: unknown, ack: unknown) => {
+      const reply = safeAck<PlayerResumeRoomAck>(ack);
+      try {
+        if (!isPlayerResumeRoomPayload(payload)) {
+          reply({ ok: false, error: "SESSION_INVALID" });
+          return;
+        }
+        if (socket.data.role) {
+          reply({ ok: false, error: "SESSION_INVALID" });
+          return;
+        }
+        const roomCode = normalizeRoomCode(payload.roomCode)!;
+        const room = roomManager.getRoom(roomCode);
+        if (!room) {
+          reply({ ok: false, error: "ROOM_NOT_FOUND" });
+          return;
+        }
+        const result = room.resumePlayer(
+          payload.playerId,
+          payload.sessionToken,
+          socket.id,
+        );
+        if (!result.ok) {
+          reply(result);
+          return;
+        }
 
-      setPlayerSession(socket, room, payload.playerId);
-      socket.join(room.code);
-      const now = Date.now();
-      reply({
-        ok: true,
-        playerId: payload.playerId,
-        playerSessionToken: payload.sessionToken,
-        snapshot: room.toSnapshot(now),
-      });
-      io.to(room.code).emit(SOCKET_EVENTS.roomPlayerConnectionChanged, {
-        playerId: payload.playerId,
-        connected: true,
-      });
-      broadcastSnapshot(io, room, now);
-    } catch {
-      reply({ ok: false, error: "SESSION_INVALID" });
-    }
-  });
+        setPlayerSession(socket, room, payload.playerId);
+        socket.join(room.code);
+        const now = Date.now();
+        reply({
+          ok: true,
+          playerId: payload.playerId,
+          playerSessionToken: payload.sessionToken,
+          snapshot: room.toSnapshot(now),
+        });
+        io.to(room.code).emit(SOCKET_EVENTS.roomPlayerConnectionChanged, {
+          playerId: payload.playerId,
+          connected: true,
+        });
+        broadcastSnapshot(io, room, now);
+      } catch {
+        reply({ ok: false, error: "SESSION_INVALID" });
+      }
+    },
+  );
 
   socket.on(SOCKET_EVENTS.playerStep, (payload: unknown, ack: unknown) => {
     const reply = safeAck<PlayerStepAck>(ack);
@@ -134,7 +151,12 @@ export function registerPlayerHandlers(
         return;
       }
       const now = Date.now();
-      const outcome = session.room.applyStep(session.playerId, payload.foot, now, payload.clientSeq);
+      const outcome = session.room.applyStep(
+        session.playerId,
+        payload.foot,
+        now,
+        payload.clientSeq,
+      );
       if (!outcome.ok) {
         reply(outcome);
         return;
@@ -151,6 +173,39 @@ export function registerPlayerHandlers(
           ranking: session.room.getLastRanking(),
           reason: outcome.concluded,
         });
+      }
+    } catch {
+      reply({ ok: false, error: "INVALID_PAYLOAD" });
+    }
+  });
+
+  // 觀眾表情只送給主控台（大螢幕），其他玩家的手機不需要。
+  socket.on(SOCKET_EVENTS.playerReaction, (payload: unknown, ack: unknown) => {
+    const reply = safeAck<PlayerReactionAck>(ack);
+    try {
+      if (!isPlayerReactionPayload(payload)) {
+        reply({ ok: false, error: "INVALID_PAYLOAD" });
+        return;
+      }
+      const session = getAuthenticatedPlayerSession(socket, roomManager);
+      if (!session) {
+        reply({ ok: false, error: "NOT_AUTHENTICATED" });
+        return;
+      }
+      const result = session.room.react(session.playerId, Date.now());
+      if (!result.ok) {
+        reply(result);
+        return;
+      }
+      reply({ ok: true });
+      const hostSocketId = session.room.hostSocketId;
+      if (hostSocketId) {
+        const reaction: RoomPlayerReactionPayload = {
+          playerId: session.playerId,
+          name: result.name,
+          emoji: payload.emoji,
+        };
+        io.to(hostSocketId).emit(SOCKET_EVENTS.roomPlayerReaction, reaction);
       }
     } catch {
       reply({ ok: false, error: "INVALID_PAYLOAD" });

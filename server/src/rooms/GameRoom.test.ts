@@ -8,6 +8,7 @@ import {
   MAX_GAME_DURATION_MS,
   MUSIC_LOOKING_MIN_MS,
   MUSIC_TRACK_DURATION_MS,
+  REACTION_COOLDOWN_MS,
   RECONNECT_GRACE_MS,
   SPEED_BOOST_CHECK_INTERVAL_MS,
   SPEED_BOOST_DURATION_MS,
@@ -755,4 +756,50 @@ test("progress is batched per player until drained", () => {
   assert.equal(caught.playerId, "p2");
   assert.equal(caught.caught, 1);
   assert.equal(caught.score, DEFAULT_ROOM_SETTINGS.maxScore - 1);
+});
+
+test("a step that lands while the ghost is turning around is flagged as a close call", () => {
+  const room = roomJustStartedPlaying(noFakeTurnRng(), alwaysRng(1));
+  room.tick(PLAYING_STARTS_AT);
+  const normal = room.applyStep("p1", "left", PLAYING_STARTS_AT + 100);
+  assert.ok(normal.ok);
+  assert.deepEqual(normal.result, {
+    kind: "advanced",
+    distanceAfter: STEP_DISTANCE_M,
+    finished: false,
+  });
+
+  room.tick(LOOK_AWAY_1_END); // -> TURNING_TO_LOOK
+  const close = room.applyStep("p1", "right", LOOK_AWAY_1_END + 50);
+  assert.ok(close.ok);
+  assert.equal(close.result.kind, "advanced");
+  assert.equal(
+    close.result.kind === "advanced" && close.result.closeCall,
+    true,
+  );
+});
+
+test("reactions are only open to spectators and are cooled down per player", () => {
+  const room = new GameRoom("AB12", "host1", noFakeTurnRng(), alwaysRng(1));
+  room.join("p1", "Alice");
+  assert.deepEqual(room.react("p1", 0), { ok: true, name: "Alice" });
+  assert.deepEqual(room.react("p1", REACTION_COOLDOWN_MS - 1), {
+    ok: false,
+    error: "RATE_LIMITED",
+  });
+  assert.deepEqual(room.react("ghost", 0), {
+    ok: false,
+    error: "NOT_AUTHENTICATED",
+  });
+
+  room.startGame(10_000);
+  room.tick(10_000);
+  // 還在場上的玩家不能送表情。
+  assert.deepEqual(room.react("p1", 20_000), {
+    ok: false,
+    error: "NOT_ALLOWED",
+  });
+
+  room.forceEndGame();
+  assert.deepEqual(room.react("p1", 20_000), { ok: true, name: "Alice" });
 });

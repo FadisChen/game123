@@ -1,5 +1,6 @@
 import "./style.css";
 import "./game/game-ui.css";
+import "./party.css";
 import { HostController } from "./host/HostController";
 
 const app = document.querySelector<HTMLDivElement>("#app");

@@ -117,6 +117,12 @@ export const SPEED_BOOST_MULTIPLIER = 1.5;
 // 中槍後的「聖人模式」保護期：這段時間內不可前進、也不會再被扣血
 export const HIT_LOCKOUT_MS = 3000;
 
+// 觀眾表情：等待開局、已出局或已抵達的玩家可以送表情到大螢幕，出局的人也還有事可做。
+// 進行中的玩家不開放，避免分心，也避免拿來干擾別人。
+export const REACTION_EMOJIS = ["😂", "😱", "🔥", "👏", "👻", "💪"] as const;
+export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
+export const REACTION_COOLDOWN_MS = 600;
+
 // Phase 2：多人連線相關參數
 export const MAX_GAME_DURATION_MS = 4 * 60_000; // PRD 23.6 建議 3~5 分鐘
 export const RECONNECT_GRACE_MS = 30_000; // PRD 第 19 章

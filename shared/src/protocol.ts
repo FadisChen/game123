@@ -1,4 +1,4 @@
-import type { RoomSettings } from "./config";
+import type { ReactionEmoji, RoomSettings } from "./config";
 import type { Foot } from "./Player";
 import type { GhostState } from "./GhostAI";
 import type { RankedPlayer } from "./ranking";
@@ -87,6 +87,8 @@ export type StepResultMsg =
       distanceAfter: number;
       finished: boolean;
       finishedAtMs?: number;
+      /** 鬼已經開始轉頭（TURNING_TO_LOOK）時還踩成功的一步，玩家端顯示「好險！」。 */
+      closeCall?: boolean;
     }
   | { kind: "locked"; remainingMs: number }
   /** 鬼剛開始審視的判定寬容期內踩的腳：不前進、不扣分。 */
@@ -158,6 +160,15 @@ export interface PlayerStepPayload {
 export type PlayerStepAck =
   { ok: true; result: StepResultMsg } | { ok: false; error: StepErrorCode };
 
+export type ReactionErrorCode =
+  "INVALID_PAYLOAD" | "NOT_AUTHENTICATED" | "NOT_ALLOWED" | "RATE_LIMITED";
+
+export interface PlayerReactionPayload {
+  emoji: ReactionEmoji;
+}
+export type PlayerReactionAck =
+  { ok: true } | { ok: false; error: ReactionErrorCode };
+
 // ---------- Server -> Room（廣播） ----------
 
 export interface RoomPhaseChangedPayload {
@@ -221,6 +232,13 @@ export interface RoomPlayerBoostChangedPayload {
   untilMs?: number;
 }
 
+/** 觀眾表情，只送給主控台，在大螢幕上飄過。 */
+export interface RoomPlayerReactionPayload {
+  playerId: PlayerId;
+  name: string;
+  emoji: ReactionEmoji;
+}
+
 /** Socket.IO 事件名稱常數，前後端都從這裡引用，避免字串打錯字造成訊息對不上。 */
 export const SOCKET_EVENTS = {
   hostCreateRoom: "host:createRoom",
@@ -235,6 +253,7 @@ export const SOCKET_EVENTS = {
   playerJoinRoom: "player:joinRoom",
   playerResumeRoom: "player:resumeRoom",
   playerStep: "player:step",
+  playerReaction: "player:reaction",
   timeSync: "time:sync",
 
   roomState: "room:state",
@@ -246,5 +265,6 @@ export const SOCKET_EVENTS = {
   roomPlayerConnectionChanged: "room:playerConnectionChanged",
   roomPlayerBoostChanged: "room:playerBoostChanged",
   roomGameOver: "room:gameOver",
+  roomPlayerReaction: "room:playerReaction",
   roomClosed: "room:closed",
 } as const;

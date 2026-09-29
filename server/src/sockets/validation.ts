@@ -1,3 +1,4 @@
+import { REACTION_EMOJIS, type PlayerReactionPayload } from "shared";
 import type {
   HostCreateRoomPayload,
   HostResumeRoomPayload,
@@ -15,9 +16,15 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+function hasExactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
   const actual = Object.keys(value).sort();
-  return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
+  return (
+    actual.length === keys.length &&
+    actual.every((key, index) => key === [...keys].sort()[index])
+  );
 }
 
 export function normalizeRoomCode(value: unknown): string | null {
@@ -27,18 +34,26 @@ export function normalizeRoomCode(value: unknown): string | null {
 }
 
 export function isSessionToken(value: unknown): value is string {
-  return typeof value === "string" && value.length >= SESSION_TOKEN_MIN_LENGTH && value.length <= 128;
+  return (
+    typeof value === "string" &&
+    value.length >= SESSION_TOKEN_MIN_LENGTH &&
+    value.length <= 128
+  );
 }
 
 export function isEmptyPayload(value: unknown): value is Record<string, never> {
   return isRecord(value) && Object.keys(value).length === 0;
 }
 
-export function isHostCreateRoomPayload(value: unknown): value is HostCreateRoomPayload {
+export function isHostCreateRoomPayload(
+  value: unknown,
+): value is HostCreateRoomPayload {
   return isEmptyPayload(value);
 }
 
-export function isHostResumeRoomPayload(value: unknown): value is HostResumeRoomPayload {
+export function isHostResumeRoomPayload(
+  value: unknown,
+): value is HostResumeRoomPayload {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["roomCode", "sessionToken"]) &&
@@ -47,15 +62,25 @@ export function isHostResumeRoomPayload(value: unknown): value is HostResumeRoom
   );
 }
 
-export function isHostRoomActionPayload(value: unknown): value is HostRoomActionPayload {
+export function isHostRoomActionPayload(
+  value: unknown,
+): value is HostRoomActionPayload {
   return isEmptyPayload(value);
 }
 
-export function isHostUpdateSettingsPayload(value: unknown): value is HostUpdateSettingsPayload {
-  return isRecord(value) && hasExactKeys(value, ["settings"]) && isRecord(value.settings);
+export function isHostUpdateSettingsPayload(
+  value: unknown,
+): value is HostUpdateSettingsPayload {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["settings"]) &&
+    isRecord(value.settings)
+  );
 }
 
-export function isPlayerJoinRoomPayload(value: unknown): value is PlayerJoinRoomPayload {
+export function isPlayerJoinRoomPayload(
+  value: unknown,
+): value is PlayerJoinRoomPayload {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["roomCode", "name"]) &&
@@ -64,7 +89,9 @@ export function isPlayerJoinRoomPayload(value: unknown): value is PlayerJoinRoom
   );
 }
 
-export function isPlayerResumeRoomPayload(value: unknown): value is PlayerResumeRoomPayload {
+export function isPlayerResumeRoomPayload(
+  value: unknown,
+): value is PlayerResumeRoomPayload {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["roomCode", "playerId", "sessionToken"]) &&
@@ -75,7 +102,9 @@ export function isPlayerResumeRoomPayload(value: unknown): value is PlayerResume
   );
 }
 
-export function isPlayerStepPayload(value: unknown): value is PlayerStepPayload {
+export function isPlayerStepPayload(
+  value: unknown,
+): value is PlayerStepPayload {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["foot", "clientSeq"]) &&
@@ -86,6 +115,18 @@ export function isPlayerStepPayload(value: unknown): value is PlayerStepPayload 
   );
 }
 
+export function isPlayerReactionPayload(
+  value: unknown,
+): value is PlayerReactionPayload {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["emoji"]) &&
+    (REACTION_EMOJIS as readonly unknown[]).includes(value.emoji)
+  );
+}
+
 export function safeAck<T>(ack: unknown): (response: T) => void {
-  return typeof ack === "function" ? (ack as (response: T) => void) : () => undefined;
+  return typeof ack === "function"
+    ? (ack as (response: T) => void)
+    : () => undefined;
 }

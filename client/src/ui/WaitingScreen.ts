@@ -5,6 +5,7 @@ export class WaitingScreen {
   private readonly root: HTMLDivElement;
   private readonly messageEl: HTMLParagraphElement;
   private readonly errorEl: HTMLParagraphElement;
+  private readonly lobbyEl: HTMLParagraphElement;
 
   constructor(container: HTMLElement, playerName: string) {
     this.root = document.createElement("div");
@@ -28,8 +29,14 @@ export class WaitingScreen {
     this.messageEl.style.cssText = "margin:0; font-size:18px;";
     card.appendChild(this.messageEl);
 
+    this.lobbyEl = document.createElement("p");
+    this.lobbyEl.className = "waiting-lobby";
+    this.lobbyEl.hidden = true;
+    card.appendChild(this.lobbyEl);
+
     this.errorEl = document.createElement("p");
-    this.errorEl.style.cssText = "margin:16px 0 0; font-size:15px; color:#f94144; display:none;";
+    this.errorEl.style.cssText =
+      "margin:16px 0 0; font-size:15px; color:#f94144; display:none;";
     card.appendChild(this.errorEl);
 
     this.root.appendChild(card);
@@ -38,6 +45,12 @@ export class WaitingScreen {
 
   setMessage(message: string = DEFAULT_MESSAGE): void {
     this.messageEl.textContent = message;
+  }
+
+  /** 等待開局時顯示目前人數；null 則隱藏（例如個人已出局、正在重新連線）。 */
+  setLobbyInfo(text: string | null): void {
+    this.lobbyEl.hidden = text === null;
+    if (text !== null) this.lobbyEl.textContent = text;
   }
 
   showError(message: string): void {

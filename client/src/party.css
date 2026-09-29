@@ -1,0 +1,490 @@
+/* 派對感效果：大螢幕輪次徽章、開局前 QR 大卡、觀眾表情、頒獎台、彩帶，以及玩家端的紅綠燈與結算名次。 */
+
+/* ---------- 大螢幕：輪次徽章、開局前 QR 大卡、觀眾表情 ---------- */
+.stage-round {
+  padding: 5px 16px;
+  border: 1px solid #fff5de40;
+  border-radius: 999px;
+  background: #182e36d9;
+  color: #f4f4e9;
+  font:
+    700 clamp(14px, 2.2vh, 22px) / 1.2 "Bahnschrift",
+    "Microsoft JhengHei",
+    sans-serif;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(8px);
+}
+.stage-round[data-fast="true"] {
+  border-color: #ef938c99;
+  color: #ffd2cc;
+}
+.stage-round.is-bumped {
+  animation: stage-round-bump 600ms ease-out;
+}
+@keyframes stage-round-bump {
+  30% {
+    transform: scale(1.25);
+    background: #e7a342;
+    color: #20272b;
+  }
+}
+.stage-lobby {
+  position: absolute;
+  top: 50%;
+  left: 32px;
+  z-index: 13;
+  width: clamp(220px, 22vw, 320px);
+  max-height: calc(100% - 48px);
+  overflow: hidden;
+  transform: translateY(-50%);
+  padding: 22px 22px 18px;
+  border: 1px solid #fff5de40;
+  border-radius: 22px;
+  background: linear-gradient(160deg, #203842f2, #13262df2);
+  box-shadow: 0 24px 60px #0b1a1f66;
+  text-align: center;
+  animation: stage-lobby-in 420ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  pointer-events: none;
+}
+.stage-lobby h2 {
+  margin: 0 0 14px;
+  color: #eac58b;
+  font-size: clamp(18px, 2.4vh, 26px);
+  letter-spacing: 0.14em;
+}
+.stage-lobby-qr {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: #fff;
+}
+.stage-lobby-code {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  margin: 14px 0 6px;
+}
+.stage-lobby-code span {
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0.2em;
+}
+.stage-lobby-code b {
+  color: #a0edc3;
+  font:
+    700 clamp(34px, 5vh, 52px) / 1 "Bahnschrift",
+    sans-serif;
+  letter-spacing: 0.16em;
+}
+.stage-lobby-count {
+  margin: 0 0 10px;
+  color: #d4e4dc;
+  font-size: 15px;
+}
+.stage-lobby-count strong {
+  color: #a0edc3;
+  font-size: 22px;
+}
+.stage-lobby-names {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stage-lobby-names li {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #fff5de1f;
+  font-size: 13px;
+}
+.stage-lobby-names li.is-new {
+  animation: stage-name-pop 900ms ease-out;
+}
+.stage-lobby-names li.is-more {
+  background: none;
+  color: var(--muted);
+}
+@keyframes stage-lobby-in {
+  from {
+    opacity: 0;
+    transform: translate(-30px, -50%);
+  }
+}
+@keyframes stage-name-pop {
+  0% {
+    transform: scale(0.4);
+    background: #a0edc3;
+    color: #182e36;
+  }
+  40% {
+    transform: scale(1.2);
+    background: #a0edc3;
+    color: #182e36;
+  }
+}
+.stage-reactions {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  overflow: hidden;
+  pointer-events: none;
+}
+.stage-reaction {
+  position: absolute;
+  bottom: -70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: stage-reaction-float 3.2s ease-out forwards;
+}
+.stage-reaction span {
+  font-size: clamp(38px, 6vh, 64px);
+  line-height: 1;
+  filter: drop-shadow(0 4px 8px #0006);
+}
+.stage-reaction small {
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #182e36d9;
+  color: #f4f4e9;
+  font-size: 12px;
+  white-space: nowrap;
+}
+@keyframes stage-reaction-float {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(var(--sway) * 0.2), -80px) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--sway), -58vh) scale(0.9);
+  }
+}
+
+/* ---------- 主控台頒獎台 ---------- */
+.ranking-card {
+  width: min(620px, 92vw);
+}
+.ranking-podium {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  gap: 10px;
+  margin: 8px 0 18px;
+  padding: 0;
+  list-style: none;
+}
+.ranking-podium li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  animation: podium-rise 700ms cubic-bezier(0.2, 0.9, 0.3, 1.15) backwards;
+}
+.ranking-podium li[data-place="1"] {
+  animation-delay: 500ms;
+}
+.ranking-podium li[data-place="2"] {
+  animation-delay: 250ms;
+}
+.podium-medal {
+  font-size: 34px;
+}
+.ranking-podium li[data-place="1"] .podium-medal {
+  font-size: 46px;
+}
+.ranking-podium strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+}
+.ranking-podium li[data-place="1"] strong {
+  color: #fdd835;
+  font-size: 22px;
+}
+.ranking-podium small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.podium-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 64px;
+  margin-top: 6px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(#c0c7c9, #7d8a8e);
+  color: #20272b;
+  font:
+    800 30px "Bahnschrift",
+    sans-serif;
+}
+.ranking-podium li[data-place="1"] .podium-block {
+  height: 100px;
+  background: linear-gradient(#fbe27a, #d9a52b);
+}
+.ranking-podium li[data-place="3"] .podium-block {
+  height: 46px;
+  background: linear-gradient(#e6ad7c, #a86a3c);
+}
+@keyframes podium-rise {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+}
+
+/* ---------- 彩帶（玩家抵達／第一名、主控台頒獎） ---------- */
+.confetti-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+.confetti-layer i {
+  position: absolute;
+  top: -16px;
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall {
+  to {
+    transform: translate(var(--drift), 110vh) rotate(var(--spin));
+  }
+}
+
+/* ---------- 玩家：標題底板、愛心、紅綠燈、結算名次、表情列 ---------- */
+.player-game .player-identity {
+  padding: 8px 16px 8px 12px;
+  border: 1px solid #fff5de33;
+  border-radius: 16px;
+  background: #17303acc;
+  backdrop-filter: blur(10px);
+}
+.heart-full {
+  color: #ff6b7d;
+  text-shadow: 0 0 8px #ff6b7d88;
+}
+.heart-empty {
+  color: #fff5de66;
+}
+.heart-lost {
+  display: inline-block;
+  animation: heart-lost 700ms ease-out;
+}
+@keyframes heart-lost {
+  0% {
+    transform: scale(1.8);
+    color: #ff6b7d;
+  }
+  60% {
+    transform: scale(0.8);
+  }
+}
+.signal-light {
+  position: absolute;
+  bottom: 104px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  padding: 6px 16px 6px 12px;
+  border-radius: 999px;
+  background: #102b36d9;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.signal-light::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
+.signal-light[data-signal="go"] {
+  color: #8deab0;
+}
+.signal-light[data-signal="stop"] {
+  color: #ff6b6b;
+  animation: signal-stop 420ms ease-in-out infinite alternate;
+}
+@keyframes signal-stop {
+  to {
+    transform: translateX(-50%) scale(1.08);
+  }
+}
+.signal-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: box-shadow 160ms;
+}
+.signal-glow[data-signal="go"] {
+  box-shadow: inset 0 0 40px 2px #8deab040;
+}
+.signal-glow[data-signal="stop"] {
+  box-shadow:
+    inset 0 0 0 4px #ff5a5acc,
+    inset 0 0 70px 12px #ff5a5a66;
+}
+.player-game .screen-card p {
+  white-space: pre-line;
+  line-height: 1.6;
+}
+.waiting-lobby {
+  margin: 14px 0 0 !important;
+  color: #a0edc3;
+  font-size: 14px !important;
+}
+.result-rank {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  column-gap: 6px;
+  margin: -6px 0 6px;
+  color: #eac58b;
+  font-size: 18px;
+  font-weight: 700;
+}
+.result-rank strong {
+  font:
+    800 56px/1 "Bahnschrift",
+    sans-serif;
+}
+.result-rank small {
+  flex-basis: 100%;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.result-card[data-outcome="finished"] .result-rank strong {
+  color: #fdd835;
+  text-shadow: 0 0 24px #fdd83588;
+}
+.reaction-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  padding: 6px 8px 6px 14px;
+  border: 1px solid #fff5de40;
+  border-radius: 999px;
+  background: #102b36e6;
+  box-shadow: 0 8px 24px #0b1a1f55;
+  backdrop-filter: blur(10px);
+}
+.reaction-bar-label {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.reaction-button {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #fff5de14;
+  font-size: 22px;
+  line-height: 1;
+  touch-action: manipulation;
+}
+.reaction-bar.is-cooling .reaction-button {
+  opacity: 0.55;
+}
+.reaction-button.is-sent {
+  animation: reaction-sent 450ms ease-out;
+}
+@keyframes reaction-sent {
+  40% {
+    transform: translateY(-10px) scale(1.35);
+    background: #a0edc355;
+  }
+}
+
+@media (max-height: 600px) and (orientation: landscape) {
+  .player-game .player-identity {
+    padding: 5px 12px 5px 9px;
+    border-radius: 12px;
+  }
+  .signal-light {
+    bottom: 80px;
+    padding: 4px 12px 4px 9px;
+    font-size: 12px;
+  }
+  .signal-light::before {
+    width: 9px;
+    height: 9px;
+  }
+  .result-rank strong {
+    font-size: 40px;
+  }
+  .reaction-bar {
+    bottom: 8px;
+    padding: 4px 6px 4px 12px;
+  }
+  .reaction-button {
+    width: 36px;
+    height: 36px;
+    font-size: 19px;
+  }
+}
+@media (max-width: 1000px) {
+  .stage-lobby {
+    left: 16px;
+    padding: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti-layer,
+  .stage-reaction {
+    display: none;
+  }
+}
+/* 感應模式的直向手機（約 360～390px 寬）：拿掉標籤、縮小按鈕，六個表情才塞得下。 */
+@media (max-width: 480px) {
+  .reaction-bar {
+    padding: 5px 6px;
+    gap: 4px;
+  }
+  .reaction-bar-label {
+    display: none;
+  }
+  .reaction-button {
+    width: 38px;
+    height: 38px;
+    font-size: 20px;
+  }
+}

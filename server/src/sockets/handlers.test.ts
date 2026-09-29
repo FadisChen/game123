@@ -4,6 +4,7 @@ import type { Server, Socket } from "socket.io";
 import {
   type HostCreateRoomAck,
   type PlayerJoinRoomAck,
+  type PlayerReactionAck,
   type PlayerResumeRoomAck,
   type PlayerStepAck,
 } from "shared";
@@ -39,7 +40,11 @@ function fakeSocket(id: string): FakeSocket {
   return socket;
 }
 
-function invoke<T>(socket: FakeSocket, event: string, payload: unknown): Promise<T> {
+function invoke<T>(
+  socket: FakeSocket,
+  event: string,
+  payload: unknown,
+): Promise<T> {
   return new Promise((resolve) => {
     const handler = socket.handlers.get(event);
     if (!handler) throw new Error(`handler not registered: ${event}`);
@@ -55,9 +60,24 @@ test("socket handlers issue server identities and reject spoofed or malformed op
   const host = fakeSocket("host-1");
   const player = fakeSocket("player-1");
 
-  registerHostHandlers(io, host as unknown as Socket, roomManager, createLimiter);
-  registerHostHandlers(io, player as unknown as Socket, roomManager, createLimiter);
-  registerPlayerHandlers(io, player as unknown as Socket, roomManager, joinLimiter);
+  registerHostHandlers(
+    io,
+    host as unknown as Socket,
+    roomManager,
+    createLimiter,
+  );
+  registerHostHandlers(
+    io,
+    player as unknown as Socket,
+    roomManager,
+    createLimiter,
+  );
+  registerPlayerHandlers(
+    io,
+    player as unknown as Socket,
+    roomManager,
+    joinLimiter,
+  );
 
   const created = await invoke<HostCreateRoomAck>(host, "host:createRoom", {});
   if (!created.ok) throw new Error(`create failed: ${created.error}`);
@@ -71,8 +91,15 @@ test("socket handlers issue server identities and reject spoofed or malformed op
   assert.equal(joined.playerId.length > 0, true);
   assert.equal(joined.playerSessionToken.length >= 32, true);
 
-  const spoofedHostAction = await invoke<{ ok: false; error: string }>(player, "host:startGame", {});
-  assert.deepEqual(spoofedHostAction, { ok: false, error: "NOT_AUTHENTICATED" });
+  const spoofedHostAction = await invoke<{ ok: false; error: string }>(
+    player,
+    "host:startGame",
+    {},
+  );
+  assert.deepEqual(spoofedHostAction, {
+    ok: false,
+    error: "NOT_AUTHENTICATED",
+  });
   const malformedStep = await invoke<PlayerStepAck>(player, "player:step", {
     foot: "left",
     clientSeq: "0",
@@ -80,16 +107,90 @@ test("socket handlers issue server identities and reject spoofed or malformed op
   assert.deepEqual(malformedStep, { ok: false, error: "INVALID_PAYLOAD" });
 
   const wrongResumeSocket = fakeSocket("player-2");
-  registerPlayerHandlers(io, wrongResumeSocket as unknown as Socket, roomManager, joinLimiter);
-  const wrongResume = await invoke<PlayerResumeRoomAck>(wrongResumeSocket, "player:resumeRoom", {
-    roomCode: created.roomCode,
-    playerId: joined.playerId,
-    sessionToken: "x".repeat(43),
-  });
+  registerPlayerHandlers(
+    io,
+    wrongResumeSocket as unknown as Socket,
+    roomManager,
+    joinLimiter,
+  );
+  const wrongResume = await invoke<PlayerResumeRoomAck>(
+    wrongResumeSocket,
+    "player:resumeRoom",
+    {
+      roomCode: created.roomCode,
+      playerId: joined.playerId,
+      sessionToken: "x".repeat(43),
+    },
+  );
   assert.deepEqual(wrongResume, { ok: false, error: "SESSION_INVALID" });
 
   const started = await invoke<{ ok: true }>(host, "host:startGame", {});
   assert.deepEqual(started, { ok: true });
-  const stepped = await invoke<PlayerStepAck>(player, "player:step", { foot: "left", clientSeq: 0 });
+  const stepped = await invoke<PlayerStepAck>(player, "player:step", {
+    foot: "left",
+    clientSeq: 0,
+  });
   assert.equal(stepped.ok, true);
+});
+
+test("player reactions are validated, rate limited and relayed only to the host socket", async () => {
+  const emitted: { target: string; event: string; payload: unknown }[] = [];
+  const io = {
+    to: (target: string) => ({
+      emit: (event: string, payload: unknown) =>
+        emitted.push({ target, event, payload }),
+    }),
+  } as unknown as Server;
+  const roomManager = new RoomManager(() => () => 0.5);
+  const host = fakeSocket("host-1");
+  const player = fakeSocket("player-1");
+  registerHostHandlers(
+    io,
+    host as unknown as Socket,
+    roomManager,
+    new RateLimiter(60_000, 10),
+  );
+  registerPlayerHandlers(
+    io,
+    player as unknown as Socket,
+    roomManager,
+    new RateLimiter(60_000, 300),
+  );
+
+  const created = await invoke<HostCreateRoomAck>(host, "host:createRoom", {});
+  if (!created.ok) throw new Error(`create failed: ${created.error}`);
+  const joined = await invoke<PlayerJoinRoomAck>(player, "player:joinRoom", {
+    roomCode: created.roomCode,
+    name: "Alice",
+  });
+  if (!joined.ok) throw new Error(`join failed: ${joined.error}`);
+  emitted.length = 0;
+
+  assert.deepEqual(
+    await invoke<PlayerReactionAck>(player, "player:reaction", {
+      emoji: "nope",
+    }),
+    {
+      ok: false,
+      error: "INVALID_PAYLOAD",
+    },
+  );
+  assert.deepEqual(
+    await invoke<PlayerReactionAck>(player, "player:reaction", { emoji: "🔥" }),
+    { ok: true },
+  );
+  assert.deepEqual(
+    await invoke<PlayerReactionAck>(player, "player:reaction", { emoji: "🔥" }),
+    {
+      ok: false,
+      error: "RATE_LIMITED",
+    },
+  );
+  assert.deepEqual(emitted, [
+    {
+      target: "host-1",
+      event: "room:playerReaction",
+      payload: { playerId: joined.playerId, name: "Alice", emoji: "🔥" },
+    },
+  ]);
 });

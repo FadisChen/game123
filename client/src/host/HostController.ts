@@ -51,6 +51,8 @@ export class HostController {
   private playersDirty = false;
   /** 避免開場運鏡＋倒數播放期間被連點「開始遊戲」重複觸發。 */
   private startSequenceActive = false;
+  /** 按下開始後收起開局前的 QR 大卡，回到 WAITING（重新開始）或開始失敗時再打開。 */
+  private lobbyDismissed = false;
   private currentPhase: RoomStateSnapshot["phase"] = "WAITING";
   private currentGhost: GhostVisualState | null = null;
   private connectionState: ConnectionState = "connecting";
@@ -59,7 +61,9 @@ export class HostController {
   constructor(container: HTMLElement) {
     this.container = container;
     this.wireSocketEvents();
-    this.socketClient.onConnectionState((state) => this.setConnectionState(state));
+    this.socketClient.onConnectionState((state) =>
+      this.setConnectionState(state),
+    );
     this.socketClient.onReconnect(() => void this.resumeSession());
     void this.clock.calibrate(() => this.socketClient.serverNow());
     void this.createRoom();
@@ -90,7 +94,10 @@ export class HostController {
       return;
     }
     this.roomCode = ack.roomCode;
-    this.socketClient.setHostSession({ roomCode: ack.roomCode, sessionToken: ack.hostSessionToken });
+    this.socketClient.setHostSession({
+      roomCode: ack.roomCode,
+      sessionToken: ack.hostSessionToken,
+    });
     this.setupRoom(ack.snapshot);
   }
 
@@ -107,13 +114,14 @@ export class HostController {
     }
     this.container.appendChild(viewport);
     this.scene = new HostScene(viewport);
-    this.overlay = new HostStageOverlay(viewport);
-
     const joinUrl = `${location.origin}/join/${this.roomCode}`;
+    this.overlay = new HostStageOverlay(viewport, this.roomCode, joinUrl);
+
     this.panel = new HostConsolePanel(this.container, this.roomCode, joinUrl, {
       onStart: () => {
         if (this.startSequenceActive) return;
         this.startSequenceActive = true;
+        this.lobbyDismissed = true;
         sfx.unlock();
         this.music.primeFromGesture();
         this.panel?.setStarting(true);
@@ -124,23 +132,28 @@ export class HostController {
             .then((ack) => {
               if (ack.ok) return;
               this.startSequenceActive = false;
+              this.lobbyDismissed = false;
               this.panel?.setStarting(false);
               this.panel?.showConnectionError(`控制操作失敗：${ack.error}`);
             })
             .catch(() => {
               this.startSequenceActive = false;
+              this.lobbyDismissed = false;
               this.panel?.setStarting(false);
               this.panel?.showConnectionError("連線逾時，請稍候再試");
             });
         });
       },
-      onPause: () => this.runAction(this.socketClient.pauseGame(this.actionPayload())),
+      onPause: () =>
+        this.runAction(this.socketClient.pauseGame(this.actionPayload())),
       onResume: () => {
         sfx.unlock();
         this.runAction(this.socketClient.resumeGame(this.actionPayload()));
       },
-      onEnd: () => this.runAction(this.socketClient.endGame(this.actionPayload())),
-      onRestart: () => this.runAction(this.socketClient.restartGame(this.actionPayload())),
+      onEnd: () =>
+        this.runAction(this.socketClient.endGame(this.actionPayload())),
+      onRestart: () =>
+        this.runAction(this.socketClient.restartGame(this.actionPayload())),
       onMusicRetry: () => {
         sfx.unlock();
         this.panel?.clearMusicPlaybackError();
@@ -163,10 +176,13 @@ export class HostController {
     return {};
   }
 
-  private runAction(request: Promise<{ ok: true } | { ok: false; error: string }>): void {
+  private runAction(
+    request: Promise<{ ok: true } | { ok: false; error: string }>,
+  ): void {
     void request
       .then((ack) => {
-        if (!ack.ok) this.panel?.showConnectionError(`控制操作失敗：${ack.error}`);
+        if (!ack.ok)
+          this.panel?.showConnectionError(`控制操作失敗：${ack.error}`);
       })
       .catch(() => this.panel?.showConnectionError("連線逾時，請稍候再試"));
   }
@@ -202,7 +218,10 @@ export class HostController {
       this.panel?.setSettings(payload.settings);
       this.scene?.setFinishDistance(payload.settings.finishDistanceM);
       this.panel?.setPhase(payload.phase);
-      if (payload.phase === "WAITING") this.overlay?.clearTicker();
+      if (payload.phase === "WAITING") {
+        this.overlay?.clearTicker();
+        if (!this.startSequenceActive) this.lobbyDismissed = false;
+      }
       this.syncMusic(this.clock.nowServerMs());
       this.refreshPlayerViews();
     });
@@ -240,6 +259,10 @@ export class HostController {
 
     this.socketClient.onPlayerBoostChanged((payload) =>
       this.handlePlayerBoostChanged(payload),
+    );
+
+    this.socketClient.onPlayerReaction((payload) =>
+      this.overlay?.showReaction(payload.name, payload.emoji),
     );
 
     this.socketClient.onGameOver((payload) => {
@@ -417,6 +440,16 @@ export class HostController {
         this.currentPhase,
         this.ghostReplica.getState(),
         this.pausedReason,
+      );
+      this.overlay?.setRound(
+        this.currentPhase,
+        this.currentGhost?.musicCycle ?? 0,
+        this.currentGhost?.musicPlaybackRate ?? 1,
+      );
+      // 每幀呼叫，內部比對名單沒變就不動 DOM；按下開始時 lobbyDismissed 也會立刻反映。
+      this.overlay?.setLobby(
+        this.currentPhase === "WAITING" && !this.lobbyDismissed,
+        [...this.players.values()],
       );
       const isLooking = this.ghostReplica.isLooking();
       this.scene.updateGhostVisual(

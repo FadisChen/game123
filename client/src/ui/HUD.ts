@@ -6,6 +6,8 @@ import {
 } from "shared";
 
 export type ToastVariant = "warn" | "danger" | "success" | "info";
+/** 手機上的「紅綠燈」：go＝音樂播放中可以走，stop＝鬼正在轉頭或盯著看。 */
+export type SignalLight = "go" | "stop";
 
 export class HUD {
   private readonly root = document.createElement("div");
@@ -18,6 +20,9 @@ export class HUD {
   private readonly damageFlashEl = document.createElement("div");
   private readonly hitLockEl = document.createElement("div");
   private readonly progressEl = document.createElement("div");
+  private readonly signalEl = document.createElement("div");
+  private readonly signalGlowEl = document.createElement("div");
+  private signal: SignalLight | null = null;
   private maxScore = INITIAL_SCORE;
   private toastTimer: number | undefined;
   private sprintBannerTimer: number | undefined;
@@ -55,11 +60,19 @@ export class HUD {
     this.progressEl.setAttribute("aria-valuemin", "0");
     this.progressEl.innerHTML =
       '<div><span>起點</span><strong></strong><span>終點</span></div><div class="course-progress-track"><i></i></div>';
+    this.signalEl.className = "signal-light";
+    this.signalEl.setAttribute("role", "status");
+    this.signalEl.hidden = true;
+    this.signalGlowEl.className = "signal-glow";
+    this.signalGlowEl.setAttribute("aria-hidden", "true");
+    this.signalGlowEl.hidden = true;
     this.root.append(
+      this.signalGlowEl,
       identity,
       this.scoreEl,
       this.playersEl,
       this.progressEl,
+      this.signalEl,
       this.toastEl,
       this.sprintBannerEl,
       this.vignetteEl,
@@ -83,12 +96,35 @@ export class HUD {
     );
   }
 
+  /**
+   * 紅綠燈只在狀態真的切換時動 DOM（每幀呼叫）。純視覺提示，資料來自 GhostReplicaAI，
+   * 不參與判定；null＝不顯示（暫停、非進行中、已出局）。
+   */
+  setSignal(signal: SignalLight | null): void {
+    if (signal === this.signal) return;
+    this.signal = signal;
+    this.signalEl.hidden = signal === null;
+    this.signalGlowEl.hidden = signal === null;
+    if (signal === null) return;
+    this.signalEl.dataset.signal = signal;
+    this.signalGlowEl.dataset.signal = signal;
+    this.signalEl.textContent = signal === "go" ? "前進" : "不准動";
+  }
+
   /** maxScore 決定要畫幾格愛心；主辦方可以每場調整（1~3）。 */
   setScore(score: number, maxScore = this.maxScore): void {
+    const lost = score < this.scoreEl.querySelectorAll(".heart-full").length;
     this.maxScore = maxScore;
-    this.scoreEl.textContent = Array.from({ length: maxScore }, (_, i) =>
-      i < score ? "♥" : "♡",
-    ).join(" ");
+    // 每顆愛心包一層 span 好上色；textContent 仍然是「♥ ♥ ♡」，跟以前一樣。
+    this.scoreEl.replaceChildren();
+    for (let i = 0; i < maxScore; i++) {
+      if (i > 0) this.scoreEl.append(" ");
+      const heart = document.createElement("span");
+      heart.className = i < score ? "heart heart-full" : "heart heart-empty";
+      if (lost && i === score) heart.classList.add("heart-lost");
+      heart.textContent = i < score ? "♥" : "♡";
+      this.scoreEl.append(heart);
+    }
     this.scoreEl.setAttribute(
       "aria-label",
       `剩餘 ${score} 分，共 ${maxScore} 分`,

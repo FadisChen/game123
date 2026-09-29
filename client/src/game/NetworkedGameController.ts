@@ -8,6 +8,7 @@ import {
   type PausedReason,
   type PlayerMode,
   type PlayerSummary,
+  type ReactionEmoji,
   type RoomGameOverPayload,
   type RoomPhase,
   type RoomStateSnapshot,
@@ -24,6 +25,8 @@ import { ClockSync } from "../net/ClockSync";
 import { clearPlayerSession, type SocketClient } from "../net/SocketClient";
 import { MotionInput } from "../input/MotionInput";
 import { StartCountdownScreen } from "../ui/StartCountdownScreen";
+import { ReactionBar } from "../ui/ReactionBar";
+import { burstConfetti } from "../ui/confetti";
 
 /**
  * 玩家端的網路版控制器：不再自己跑 GhostAI/Player 判定，全部改成送出意圖給伺服器，
@@ -39,6 +42,7 @@ export class NetworkedGameController {
   private readonly gameOver: GameOverScreen;
   private readonly startCountdown: StartCountdownScreen;
   private readonly controls: Controls;
+  private readonly reactionBar: ReactionBar;
   private readonly motionInput: MotionInput;
   private readonly socketClient: SocketClient;
   private readonly clock = new ClockSync();
@@ -98,6 +102,9 @@ export class NetworkedGameController {
       "等待主辦方重新開始",
     );
     this.startCountdown = new StartCountdownScreen(container);
+    this.reactionBar = new ReactionBar(container, (emoji) =>
+      this.sendReaction(emoji),
+    );
 
     this.hud.setVisible(false);
     this.controls.setVisible(false);
@@ -276,6 +283,8 @@ export class NetworkedGameController {
 
   /** 重連後光靠事件流可能錯過中間狀態，所以每次拿到完整快照都重新對齊一次畫面。 */
   private syncScreensToPhase(): void {
+    this.updateReactionBar();
+    this.updateLobbyInfo();
     if (this.connectionState !== "connected") {
       this.startCountdown.hide();
       this.motionPrompt.hidden = true;
@@ -369,6 +378,29 @@ export class NetworkedGameController {
     }
   }
 
+  /** 觀眾表情：等待開局（看完教學後）、遊戲結束，或自己已經出局/抵達時開放。伺服器會再檢查一次。 */
+  private updateReactionBar(): void {
+    this.reactionBar.setVisible(
+      this.connectionState === "connected" &&
+        ((this.serverPhase === "WAITING" && this.teachingDismissed) ||
+          this.serverPhase === "GAME_OVER" ||
+          this.myOutcome !== "active"),
+    );
+  }
+
+  private updateLobbyInfo(): void {
+    this.waiting.setLobbyInfo(
+      this.serverPhase === "WAITING" && this.connectionState === "connected"
+        ? `目前 ${this.players.size} 位玩家已加入`
+        : null,
+    );
+  }
+
+  private sendReaction(emoji: ReactionEmoji): void {
+    if (this.connectionState !== "connected") return;
+    void this.socketClient.react({ emoji }).catch(() => undefined);
+  }
+
   private async handleTeachingDismissed(): Promise<void> {
     sfx.unlock();
     this.teachingDismissed = true;
@@ -381,6 +413,7 @@ export class NetworkedGameController {
       this.teaching.setVisible(false);
       this.waiting.setVisible(true);
     }
+    this.updateReactionBar();
   }
 
   private handleStepPress(foot: Foot): void {
@@ -452,6 +485,7 @@ export class NetworkedGameController {
         break;
       case "advanced":
         sfx.play("footstep");
+        if (result.closeCall) this.hud.showToast("😅 好險！", "info");
         this.scene?.startStepTween(result.distanceAfter, foot, now);
         this.hud.setProgress(result.distanceAfter, this.finishDistanceM);
         this.maybeTriggerFinalSprint(result.distanceAfter);
@@ -459,11 +493,15 @@ export class NetworkedGameController {
           sfx.play("victory");
           this.myOutcome = "finished";
           this.hud.showOutcomeOverlay("finished");
+          burstConfetti(this.container);
           this.syncScreensToPhase();
         }
         break;
-      case "locked":
       case "ignored":
+        // 判定寬容期內的踩腳：沒前進也沒扣分，讓玩家知道剛剛差點被抓。
+        this.hud.showToast("😅 好險！差點被看到", "info");
+        break;
+      case "locked":
         break;
     }
   }
@@ -477,8 +515,8 @@ export class NetworkedGameController {
 
   private personalConclusionMessage(): string {
     return this.myOutcome === "finished"
-      ? "🏆 你已抵達終點！請等待本回合結束"
-      : "❌ 你已被淘汰，我們懷念你";
+      ? "🏆 你已抵達終點！\n送個表情到大螢幕炫耀一下"
+      : "💀 你已被淘汰\n用下方表情幫場上的人加油（或喝倒采）";
   }
 
   /** 距終點剩 FINAL_SPRINT_REMAINING_M 內時觸發一次緊張提示（對應 PRD 22.3），跟 Phase 1 版本邏輯相同。 */
@@ -499,7 +537,18 @@ export class NetworkedGameController {
     this.waiting.setVisible(false);
     const mine = payload.ranking.find((r) => r.playerId === this.playerId);
     const outcome: GameOutcome = mine?.outcome ?? "surviving";
-    this.gameOver.showResult(outcome);
+    this.gameOver.showResult(
+      outcome,
+      mine && {
+        rank: mine.rank,
+        total: payload.ranking.length,
+        distance: mine.distance,
+      },
+    );
+    // 全員出局時第一名也是淘汰者，不灑彩帶。
+    if (mine?.rank === 1 && outcome !== "eliminated")
+      burstConfetti(this.container);
+    this.updateReactionBar();
   }
 
   private loop(): void {
@@ -508,9 +557,18 @@ export class NetworkedGameController {
       const players = [...this.players.values()];
       this.scene?.updatePlayers(players, this.playerId);
       this.hud.setPlayers(players);
+      this.updateLobbyInfo();
     }
     if (this.playerMode === "main") {
       const serverNow = this.clock.nowServerMs();
+      const ghostState = this.ghostReplica.getState();
+      this.hud.setSignal(
+        this.serverPhase === "PLAYING" && this.myOutcome === "active"
+          ? ghostState === "LOOK_AWAY" || ghostState === "TURNING_AWAY"
+            ? "go"
+            : "stop"
+          : null,
+      );
       this.scene?.updateGhostVisual(
         this.ghostReplica.getFacingPlayerAmount(serverNow),
         this.ghostReplica.isLooking(),

@@ -7,6 +7,7 @@ import {
   MAX_GAME_DURATION_MS,
   MAX_PLAYERS_PER_ROOM,
   Player,
+  REACTION_COOLDOWN_MS,
   RECONNECT_GRACE_MS,
   STEP_RATE_LIMIT_WINDOW_MS,
   SPEED_BOOST_CHECK_INTERVAL_MS,
@@ -55,6 +56,8 @@ export interface ServerPlayerState {
   lastStepResult: { clientSeq: number; result: StepResultMsg } | null;
   stepWindowStartedAt: number;
   stepEventsInWindow: number;
+  /** 上次送出觀眾表情的時間，只拿來做冷卻限流（不是遊戲計時，暫停時不用平移）。 */
+  lastReactionAt: number;
 }
 
 export type RoomEvent =
@@ -80,11 +83,14 @@ function toStepResultMsg(
     | { kind: "caught"; scoreAfter: number; eliminated: boolean }
     | { kind: "advanced"; distanceAfter: number; finished: boolean },
   finishedAtMs: number | undefined,
+  closeCall: boolean,
 ): StepResultMsg {
-  if (result.kind === "advanced" && result.finished) {
-    return { ...result, finishedAtMs };
-  }
-  return result;
+  if (result.kind !== "advanced") return result;
+  return {
+    ...result,
+    ...(result.finished ? { finishedAtMs } : {}),
+    ...(closeCall ? { closeCall } : {}),
+  };
 }
 
 /**
@@ -207,6 +213,7 @@ export class GameRoom {
       lastStepResult: null,
       stepWindowStartedAt: 0,
       stepEventsInWindow: 0,
+      lastReactionAt: -Infinity,
     });
     return { ok: true };
   }
@@ -448,6 +455,9 @@ export class GameRoom {
       ? SPEED_BOOST_MULTIPLIER
       : 1;
     const result = state.player.step(foot, multiplier);
+    // 鬼已經開始轉頭但還沒真的在看：這一步合法前進，但玩家端會提示「好險！」。
+    const closeCall =
+      result.kind === "advanced" && this.ghost.getState() === "TURNING_TO_LOOK";
     if (result.kind === "advanced" && result.finished) {
       state.finishSeq = this.nextSettlementSeq++;
       state.finishedAtMs = now;
@@ -460,17 +470,43 @@ export class GameRoom {
     }
 
     const concluded = this.checkForConclusion(now);
+    const stepResult = toStepResultMsg(result, state.finishedAtMs, closeCall);
     if (clientSeq !== undefined)
-      state.lastStepResult = {
-        clientSeq,
-        result: toStepResultMsg(result, state.finishedAtMs),
-      };
+      state.lastStepResult = { clientSeq, result: stepResult };
     return {
       ok: true,
-      result: toStepResultMsg(result, state.finishedAtMs),
+      result: stepResult,
       ghostChanged,
       concluded,
     };
+  }
+
+  /**
+   * 觀眾表情：等待開局、遊戲結束，或自己已經出局/抵達時才能送，進行中的玩家不開放。
+   * 每位玩家各自冷卻 REACTION_COOLDOWN_MS，避免主控台被洗版。
+   */
+  react(
+    playerId: string,
+    now: number,
+  ):
+    | { ok: true; name: string }
+    | {
+        ok: false;
+        error: "NOT_AUTHENTICATED" | "NOT_ALLOWED" | "RATE_LIMITED";
+      } {
+    const state = this.players.get(playerId);
+    if (!state || !state.connected)
+      return { ok: false, error: "NOT_AUTHENTICATED" };
+    const spectating =
+      this.phase === "WAITING" ||
+      this.phase === "GAME_OVER" ||
+      state.player.eliminated ||
+      state.player.finished;
+    if (!spectating) return { ok: false, error: "NOT_ALLOWED" };
+    if (now - state.lastReactionAt < REACTION_COOLDOWN_MS)
+      return { ok: false, error: "RATE_LIMITED" };
+    state.lastReactionAt = now;
+    return { ok: true, name: state.name };
   }
 
   private recordProgress(state: ServerPlayerState, caught: boolean): void {

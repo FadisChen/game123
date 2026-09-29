@@ -1,4 +1,5 @@
 import QRCode from "qrcode";
+import { burstConfetti } from "../ui/confetti";
 import {
   DEFAULT_ROOM_SETTINGS,
   GRACE_OPTIONS_MS,
@@ -303,7 +304,7 @@ export class HostConsolePanel {
     this.rankingOverlay.setAttribute("aria-label", "排名結果");
     this.rankingOverlay.hidden = true;
     const rankingCard = document.createElement("div");
-    rankingCard.className = "screen-card";
+    rankingCard.className = "screen-card ranking-card";
     const rankingTitle = document.createElement("h2");
     rankingTitle.textContent = "排名結果";
     this.rankingListEl.className = "ranking-list";
@@ -604,18 +605,51 @@ export class HostConsolePanel {
     this.cameraDot.setAttribute("cy", String(y));
   }
 
+  /** 前三名上頒獎台（視覺上 2-1-3 排列），第四名之後照舊列成清單。 */
   showRanking(ranking: RankedPlayer[]): void {
     this.rankingListEl.replaceChildren();
-    for (const entry of ranking) {
+    const podium = document.createElement("ol");
+    podium.className = "ranking-podium";
+    for (const index of [1, 0, 2]) {
+      const entry = ranking[index];
+      if (!entry) continue;
+      const step = document.createElement("li");
+      step.dataset.place = String(index + 1);
+      const medal = document.createElement("span");
+      medal.className = "podium-medal";
+      medal.textContent = ["🥇", "🥈", "🥉"][index];
+      const name = document.createElement("strong");
+      name.textContent = entry.name;
+      const detail = document.createElement("small");
+      detail.textContent = rankingDetail(entry);
+      const block = document.createElement("div");
+      block.className = "podium-block";
+      block.textContent = String(entry.rank);
+      step.append(medal, name, detail, block);
+      podium.appendChild(step);
+    }
+    if (podium.children.length > 0) this.rankingListEl.appendChild(podium);
+    for (const entry of ranking.slice(3)) {
       const row = document.createElement("div");
       row.className = "host-player-row";
       const name = document.createElement("span");
       name.textContent = `#${entry.rank} ${entry.name}`;
       const result = document.createElement("span");
-      result.textContent = `${entry.distance.toFixed(1)} m · ${entry.outcome === "finished" ? "抵達" : entry.outcome === "eliminated" ? "淘汰" : "存活"}`;
+      result.textContent = rankingDetail(entry);
       row.append(name, result);
       this.rankingListEl.appendChild(row);
     }
     this.rankingOverlay.hidden = false;
+    if (ranking.length > 0) burstConfetti(this.rankingOverlay, 120);
   }
+}
+
+function rankingDetail(entry: RankedPlayer): string {
+  const outcome =
+    entry.outcome === "finished"
+      ? "抵達"
+      : entry.outcome === "eliminated"
+        ? "淘汰"
+        : "存活";
+  return `${entry.distance.toFixed(1)} m · ${outcome}`;
 }
